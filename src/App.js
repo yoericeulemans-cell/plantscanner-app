@@ -739,27 +739,51 @@ export default function App() {
     saveKeys(updatedKeys);
   };
 
-  async function callGemini(base64, apiKey, prompt, timeoutMs = 15000) {
+  async function callGemini(base64, apiKey, prompt, timeoutMs = 35000) {
     if (!apiKey) throw new Error("Geen Gemini API sleutel ingesteld.");
-    logApiCall(keys.firebaseUrl); 
-    let res;
-    try {
-      res = await fetchWithTimeout(`https://summer-snowflake-d2dc.yoericeulemans.workers.dev/gemini?api-key=${apiKey}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ base64, prompt }),
-      }, timeoutMs);
-    } catch (e) {
-      if (e.name === "AbortError") throw new Error(`Gemini antwoordde niet binnen ${Math.round(timeoutMs / 1000)}s.`);
-      throw new Error(`Gemini niet bereikbaar: ${e.message}`);
+
+    const maxAttempts = 2; // 1 poging + 1 automatische herkansing bij tijdelijke drukte
+    let lastErr;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      logApiCall(keys.firebaseUrl);
+      let res;
+      try {
+        res = await fetchWithTimeout(`https://summer-snowflake-d2dc.yoericeulemans.workers.dev/gemini?api-key=${apiKey}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ base64, prompt }),
+        }, timeoutMs);
+      } catch (e) {
+        lastErr = e.name === "AbortError"
+          ? new Error(`Gemini antwoordde niet binnen ${Math.round(timeoutMs / 1000)}s.`)
+          : new Error(`Gemini niet bereikbaar: ${e.message}`);
+        if (attempt < maxAttempts) {
+          setLoadingMsg("Verbinding mislukt, nieuwe poging...");
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        continue;
+      }
+
+      if (!res.ok) {
+        let detail = "";
+        try { detail = (await res.text()).slice(0, 150); } catch (e) {}
+        lastErr = new Error(`API Fout (${res.status})${detail ? ": " + detail : ""}`);
+        // 503 (te druk) en 429 (rate limit) zijn meestal tijdelijk — Google raadt
+        // zelf aan het gewoon nog eens te proberen. Eén keer opnieuw na 2,5s.
+        if ((res.status === 503 || res.status === 429) && attempt < maxAttempts) {
+          setLoadingMsg("Gemini heeft het even druk, nieuwe poging...");
+          await new Promise((r) => setTimeout(r, 2500));
+          continue;
+        }
+        throw lastErr;
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      return JSON.parse(rawText.replace(/```json/gi, "").replace(/```/g, "").trim());
     }
-    if (!res.ok) {
-      let detail = "";
-      try { detail = (await res.text()).slice(0, 150); } catch (e) {}
-      throw new Error(`API Fout (${res.status})${detail ? ": " + detail : ""}`);
-    }
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    return JSON.parse(rawText.replace(/```json/gi, "").replace(/```/g, "").trim());
+
+    throw lastErr;
   }
 
   async function identifyPlant(base64) {
@@ -814,7 +838,7 @@ export default function App() {
           base64,
           gemini,
           `Je bent een plantenexpert. Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck. JSON: {"name":"Naam","gezond":true/false,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":""}`,
-          15000
+          35000
         ).catch((e) => {
           errors.push(`Gemini: ${e.message}`);
           return null;
