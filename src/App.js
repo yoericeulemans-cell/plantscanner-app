@@ -472,6 +472,9 @@ export default function App() {
   const [scanMode, setScanMode] = useState("general");
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [zoomSupported, setZoomSupported] = useState(false);
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   useEffect(() => {
     localStorage.setItem(LS_KEYS.kidsMode, kidsMode ? "1" : "0");
@@ -509,14 +512,19 @@ export default function App() {
     setCameraError("");
     setTorchSupported(false);
     setTorchOn(false);
+    setZoomSupported(false);
+    setZoomLevel(1);
     setScreen("camera");
     
     const constraints = {
       video: {
         facingMode: { ideal: "environment" },
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-        advanced: [{ focusMode: "continuous" }, { exposureMode: "continuous" }]
+        // Hogere ideale resolutie gevraagd (was 1920x1080) voor een scherpere
+        // opname; "min" blijft laag zodat oudere/zwakkere camera's nog steeds
+        // gewoon een stream krijgen in plaats van meteen te falen.
+        width: { ideal: 3840, min: 1280 },
+        height: { ideal: 2160, min: 720 },
+        advanced: [{ focusMode: "continuous" }, { exposureMode: "continuous" }, { whiteBalanceMode: "continuous" }]
       }
     };
 
@@ -527,6 +535,16 @@ export default function App() {
       if (track && typeof track.getCapabilities === 'function') {
         const capabilities = track.getCapabilities();
         setTorchSupported(!!capabilities.torch);
+        if (capabilities.zoom && capabilities.zoom.max > capabilities.zoom.min) {
+          setZoomSupported(true);
+          setZoomRange({
+            min: capabilities.zoom.min,
+            max: capabilities.zoom.max,
+            step: capabilities.zoom.step || 0.1,
+          });
+          const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
+          setZoomLevel(settings.zoom || capabilities.zoom.min);
+        }
       }
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -556,8 +574,19 @@ export default function App() {
     }
   };
 
+  const handleZoomChange = async (value) => {
+    setZoomLevel(value);
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track) {
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: value }] });
+      } catch (e) {}
+    }
+  };
+
   const closeCamera = () => {
     setTorchOn(false);
+    setZoomSupported(false);
     setTorchSupported(false);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -568,6 +597,34 @@ export default function App() {
   const capturePhoto = async () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+
+    // Probeer eerst een scherpe, volwaardige foto via de ImageCapture API:
+    // die gebruikt de echte camera-capture-pijplijn (met autofocus-moment)
+    // in plaats van gewoon een los frame uit de live videopreview te grijpen,
+    // wat vaak wazig/minder scherp is. Niet elke browser ondersteunt dit
+    // (bv. Safari op iPhone vaak niet) — dan valt de code automatisch terug
+    // op de bestaande videoframe-methode hieronder.
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && typeof window.ImageCapture === "function") {
+      try {
+        const imageCapture = new window.ImageCapture(track);
+        const blob = await imageCapture.takePhoto();
+        const rawDataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Kon de scherpe foto niet lezen."));
+          reader.readAsDataURL(blob);
+        });
+        const dataUrl = await resizeDataUrl(rawDataUrl).catch(() => rawDataUrl);
+        const currentMode = scanMode;
+        closeCamera();
+        await processImage(dataUrl, currentMode);
+        return;
+      } catch (e) {
+        // Geen paniek: val gewoon stil terug op de methode hieronder.
+      }
+    }
+
     const canvas = canvasRef.current;
     let width = video.videoWidth || 1280;
     let height = video.videoHeight || 720;
@@ -942,6 +999,21 @@ export default function App() {
                 <button onClick={toggleTorch} style={{ position: "absolute", top: 30, right: 20, background: torchOn ? "#f1c40f" : "rgba(0,0,0,0.6)", color: "#fff", borderRadius: "50%", width: 55, height: 55, fontSize: 26, cursor: "pointer", border: "none" }}>
                   {torchOn ? "🔦" : "💡"}
                 </button>
+              )}
+              {zoomSupported && (
+                <div style={{ position: "absolute", bottom: 150, left: 40, right: 40, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>🔍</span>
+                  <input
+                    type="range"
+                    min={zoomRange.min}
+                    max={zoomRange.max}
+                    step={zoomRange.step}
+                    value={zoomLevel}
+                    onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, textShadow: "0 1px 3px rgba(0,0,0,0.8)", minWidth: 34 }}>{zoomLevel.toFixed(1)}x</span>
+                </div>
               )}
               <div style={{ position: "absolute", bottom: 40, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", gap: 30 }}>
                 <button onClick={closeCamera} style={{ background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: 16, padding: "14px 20px", border: "none", cursor: "pointer" }}>✕</button>
