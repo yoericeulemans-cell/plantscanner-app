@@ -513,6 +513,7 @@ export default function App() {
     setTorchSupported(false);
     setTorchOn(false);
     setZoomSupported(false);
+    setZoomRange({ min: 1, max: 3, step: 0.1 });
     setZoomLevel(1);
     setScreen("camera");
     
@@ -576,11 +577,17 @@ export default function App() {
 
   const handleZoomChange = async (value) => {
     setZoomLevel(value);
-    const track = streamRef.current?.getVideoTracks()[0];
-    if (track) {
-      try {
-        await track.applyConstraints({ advanced: [{ zoom: value }] });
-      } catch (e) {}
+    // Enkel echte hardware-zoom proberen als het toestel dat ook meldt te
+    // ondersteunen. Zonder die ondersteuning blijft het puur digitaal: de
+    // live preview wordt via CSS ingezoomd, en bij het nemen van de foto
+    // wordt het beeld bijgesneden (zie capturePhoto hieronder).
+    if (zoomSupported) {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: value }] });
+        } catch (e) {}
+      }
     }
   };
 
@@ -605,7 +612,13 @@ export default function App() {
     // (bv. Safari op iPhone vaak niet) — dan valt de code automatisch terug
     // op de bestaande videoframe-methode hieronder.
     const track = streamRef.current?.getVideoTracks()[0];
-    if (track && typeof window.ImageCapture === "function") {
+    const digitalZoomActive = !zoomSupported && zoomLevel > 1;
+
+    // Bij digitale (software) zoom slaan we de ImageCapture-route over: die
+    // zou gewoon de volle, niet-ingezoomde foto teruggeven, los van wat de
+    // gebruiker op het scherm ziet. In dat geval snijden we hieronder zelf
+    // het ingezoomde gedeelte uit het videoframe.
+    if (!digitalZoomActive && track && typeof window.ImageCapture === "function") {
       try {
         const imageCapture = new window.ImageCapture(track);
         const blob = await imageCapture.takePhoto();
@@ -639,7 +652,20 @@ export default function App() {
     }
     canvas.width = width;
     canvas.height = height;
-    canvas.getContext("2d").drawImage(video, 0, 0, width, height);
+    const ctx = canvas.getContext("2d");
+    if (digitalZoomActive) {
+      // Enkel het middelste stukje van het echte camerabeeld gebruiken
+      // (ter grootte van 1/zoomLevel), en dat uitrekken over het volledige
+      // canvas — dat is exact wat de gebruiker op het scherm zag dankzij
+      // de CSS-zoom op het video-element hierboven.
+      const srcW = video.videoWidth / zoomLevel;
+      const srcH = video.videoHeight / zoomLevel;
+      const srcX = (video.videoWidth - srcW) / 2;
+      const srcY = (video.videoHeight - srcH) / 2;
+      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, width, height);
+    } else {
+      ctx.drawImage(video, 0, 0, width, height);
+    }
     const dataUrl = canvas.toDataURL("image/jpeg", 0.90);
     const currentMode = scanMode;
     closeCamera();
@@ -994,13 +1020,13 @@ export default function App() {
             </div>
           ) : (
             <>
-              <video ref={videoRef} playsInline autoPlay muted style={{ width: "100%", height: "100vh", objectFit: "cover" }} />
+              <video ref={videoRef} playsInline autoPlay muted style={{ width: "100%", height: "100vh", objectFit: "cover", transform: !zoomSupported && zoomLevel > 1 ? `scale(${zoomLevel})` : "none", transition: "transform 0.1s linear" }} />
               {torchSupported && (
                 <button onClick={toggleTorch} style={{ position: "absolute", top: 30, right: 20, background: torchOn ? "#f1c40f" : "rgba(0,0,0,0.6)", color: "#fff", borderRadius: "50%", width: 55, height: 55, fontSize: 26, cursor: "pointer", border: "none" }}>
                   {torchOn ? "🔦" : "💡"}
                 </button>
               )}
-              {zoomSupported && (
+              {zoomRange.max > zoomRange.min && (
                 <div style={{ position: "absolute", bottom: 150, left: 40, right: 40, display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>🔍</span>
                   <input
