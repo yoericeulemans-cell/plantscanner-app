@@ -193,6 +193,16 @@ const SAFARI_MISSIES = {
     "🍂 Zoek drie verschillende soorten bladeren op de bosbodem",
     "🌧️ Vind een blad met een regendruppel erop",
     "🦔 Zoek sporen van een egel, zoals een schuilplaatsje onder bladeren",
+    "🦌 Zoek sporen van een ree of ander groot dier (afdruk of vraatsporen)",
+    "🪺 Zoek een vogelnest in een boom of struik (kijk van op een afstand!)",
+    "🌱 Vind een heel jong boompje dat net uit de grond komt",
+    "🐞 Spot een lieveheersbeestje of een kever",
+    "🌳 Vind een boom waar jij en een vriend samen nauwelijks omheen kunnen",
+    "🌲 Zoek een naaldboom en een loofboom naast elkaar",
+    "🍃 Vind dode bladeren die aan het vergaan zijn tot nieuwe aarde",
+    "🌈 Zoek vijf verschillende kleuren in de natuur om je heen",
+    "🐛 Zoek een rups of larve op een blad",
+    "🌿 Zoek een varen",
   ],
   park: [
     "🌳 Vind een grote schaduwrijke boom om onder te zitten",
@@ -210,6 +220,16 @@ const SAFARI_MISSIES = {
     "🐕 Tel hoeveel honden je op je wandeling tegenkomt",
     "🌼 Zoek de kleinste bloem die je kan vinden",
     "🍂 Vind een blad dat al helemaal droog en bruin is",
+    "🦢 Zoek een zwaan of gans bij het water",
+    "🐦 Spot een duif, mus of merel en kijk wat hij doet",
+    "🌻 Zoek een gele en een paarse bloem",
+    "🐜 Volg een mier en kijk waar ze naartoe gaat",
+    "🕊️ Zoek een veer van een vogel in het gras",
+    "🍀 Zoek een klavertje of een heel klein plantje tussen het gras",
+    "🦗 Zoek een sprinkhaan of ander klein beestje in het gras",
+    "🪨 Zoek een steen met een mooie kleur of vorm",
+    "🌿 Zoek een plant met haartjes of stekels op het blad",
+    "🐟 Zoek vissen of kikkervisjes in het water van de vijver",
   ],
   dierentuin: [
     "🦁 Zoek een dier met een dikke, opvallende vacht",
@@ -227,17 +247,58 @@ const SAFARI_MISSIES = {
     "🐧 Zoek een dier dat niet kan vliegen maar wel goed kan zwemmen",
     "🐅 Vind een dier met scherpe klauwen of tanden",
     "🦎 Zoek een dier met schubben",
+    "🦘 Zoek een dier dat springt of hupt",
+    "🐻 Vind een beer of een ander groot roofdier",
+    "🦏 Zoek een dier met een hoorn",
+    "🐊 Zoek een reptiel of een amfibie",
+    "🐠 Zoek een vis met felle kleuren",
+    "🦅 Vind een roofvogel",
+    "🐃 Zoek een dier dat in een groep of kudde leeft",
+    "🦧 Vind een aap en kijk wat hij doet",
+    "🐪 Zoek een dier dat goed tegen droogte of hitte kan",
+    "🐼 Zoek een dier dat vooral planten eet",
+    "🦦 Zoek een dier met zwemvliezen of een platte staart",
+    "🐾 Vind het kleinste dier dat je in de dierentuin ziet",
   ],
 };
 
 // Kiest een willekeurige missie-index die verschilt van de vorige, zodat dezelfde missie niet
 // twee keer na elkaar verschijnt (bij lijsten van 1 item is er uiteraard geen keuze).
-function pickNextMissionIndex(listLength, excludeIndex) {
-  if (listLength <= 1) return 0;
-  let next;
-  do {
-    next = Math.floor(Math.random() * listLength);
-  } while (next === excludeIndex);
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function loadSeen(key) {
+  try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+}
+function saveSeen(key, list) {
+  try { localStorage.setItem(key, JSON.stringify(list.slice(-400))); } catch (e) {}
+}
+const QUIZ_SEEN_KEY = "natuurscanner_seen_quiz";
+// Antwoordopties door elkaar husselen (juiste antwoord blijft correct), behalve bij opties als "geen van beide".
+function shuffleOptions(q) {
+  if (q.opts.some((o) => /bovenstaande|beide|alle drie|geen van/i.test(o))) return q;
+  const order = shuffleArray(q.opts.map((_, i) => i));
+  return { ...q, opts: order.map((i) => q.opts[i]), correct: order.indexOf(q.correct) };
+}
+// Kiest een missie die nog NIET getoond is (ook niet in vorige sessies). Pas als alle missies
+// van een gebied geweest zijn, begint de cyclus opnieuw. Nooit twee keer dezelfde na elkaar.
+function pickNextMissionIndex(list, excludeIndex, omgeving) {
+  const n = (list || []).length;
+  if (n <= 1) return 0;
+  const key = "natuurscanner_seen_missies_" + omgeving;
+  let seen = loadSeen(key).filter((t) => list.includes(t));
+  let cand = list.map((_, i) => i).filter((i) => i !== excludeIndex && !seen.includes(list[i]));
+  if (cand.length === 0) {
+    seen = excludeIndex >= 0 && list[excludeIndex] ? [list[excludeIndex]] : [];
+    cand = list.map((_, i) => i).filter((i) => i !== excludeIndex);
+  }
+  const next = cand[Math.floor(Math.random() * cand.length)];
+  saveSeen(key, [...seen, list[next]]);
   return next;
 }
 
@@ -380,6 +441,36 @@ const ALL_QUIZ_QUESTIONS = [
   { q: "Waarom trekken sommige vogels in de herfst naar het zuiden?", opts: ["Om vakantie te vieren", "Om voedsel te vinden waar het warmer is", "Ze houden van vliegen", "Zonder reden"], correct: 1, niveau: 2 },
   { q: "Wat is biodiversiteit?", opts: ["Een soort plastic", "De verscheidenheid aan planten en dieren in een gebied", "Een soort weer", "Een moestuintechniek"], correct: 1, niveau: 3 },
   { q: "Waarom is het goed om inheemse (van nature bij ons voorkomende) planten in je tuin te zetten?", opts: ["Ze trekken lokale insecten en vogels beter aan", "Ze zijn altijd goedkoper", "Ze hebben geen water nodig", "Geen enkele reden"], correct: 0, niveau: 3 },
+  // Extra vragen: dieren, bos, park, dierentuin (v2)
+  { q: "Hoeveel poten heeft een spin?", opts: ["6", "8", "4", "10"], correct: 1, niveau: 1 },
+  { q: "Hoe heet het jong van een kikker?", opts: ["Rups", "Kikkervisje", "Pop", "Veulen"], correct: 1, niveau: 1 },
+  { q: "Welke vrucht groeit aan een eik?", opts: ["Dennenappel", "Kastanje", "Eikel", "Beukennootje"], correct: 2, niveau: 1 },
+  { q: "Wat eet een panda bijna uitsluitend?", opts: ["Vis", "Bamboe", "Insecten", "Fruit"], correct: 1, niveau: 1 },
+  { q: "Welk dier heeft de langste nek?", opts: ["Olifant", "Kameel", "Struisvogel", "Giraffe"], correct: 3, niveau: 1 },
+  { q: "Wat is het grootste landdier?", opts: ["Neushoorn", "Giraffe", "Afrikaanse olifant", "Nijlpaard"], correct: 2, niveau: 1 },
+  { q: "Waarom zijn bijen belangrijk?", opts: ["Ze bestuiven bloemen en planten", "Ze eten luizen", "Ze maken de grond los", "Ze maken de lucht schoner"], correct: 0, niveau: 1 },
+  { q: "Welk dier is het snelste op het land?", opts: ["Leeuw", "Paard", "Cheeta", "Struisvogel"], correct: 2, niveau: 2 },
+  { q: "Hoe noemen we een groep wolven?", opts: ["Roedel", "Zwerm", "School", "Kudde"], correct: 0, niveau: 2 },
+  { q: "Wat zit er in de bult van een kameel?", opts: ["Water", "Lucht", "Spieren", "Vet"], correct: 3, niveau: 2 },
+  { q: "Welk dier bouwt dammen in beken en rivieren?", opts: ["Egel", "Bever", "Das", "Vos"], correct: 1, niveau: 2 },
+  { q: "Welke boom herken je aan zijn witte schors met zwarte vlekken?", opts: ["Berk", "Eik", "Den", "Plataan"], correct: 0, niveau: 2 },
+  { q: "Wat gebeurt er met een egel tijdens zijn winterslaap?", opts: ["Hij eet extra veel", "Zijn hartslag en lichaamstemperatuur dalen sterk", "Hij verhuist naar het zuiden", "Hij verandert van kleur"], correct: 1, niveau: 2 },
+  { q: "Welke vogel kan zijn kop bijna helemaal omdraaien?", opts: ["Uil", "Mus", "Eend", "Duif"], correct: 0, niveau: 2 },
+  { q: "Welk reptiel kan van kleur veranderen?", opts: ["Krokodil", "Schildpad", "Kameleon", "Slang"], correct: 2, niveau: 2 },
+  { q: "Wat is een predator?", opts: ["Een plant", "Een jager die andere dieren eet", "Een prooidier", "Een plantenetend dier"], correct: 1, niveau: 2 },
+  { q: "Hoe kan je de leeftijd van een boomstam schatten?", opts: ["Aan de kleur van de bladeren", "Aan de lengte van de wortels", "Door de jaarringen te tellen", "Aan het aantal vogels"], correct: 2, niveau: 2 },
+  { q: "Wat is het verschil tussen een carnivoor en een omnivoor?", opts: ["Carnivoren eten planten, omnivoren vlees", "Carnivoren eten vlees, omnivoren planten én vlees", "Er is geen verschil", "Omnivoren eten enkel insecten"], correct: 1, niveau: 3 },
+  { q: "Wat is symbiose?", opts: ["Twee soorten die samenleven en elkaar helpen", "Een dier dat een ander dier opeet", "Een plant die afsterft", "Een soort bodem"], correct: 0, niveau: 3 },
+  { q: "Wat is een parasiet?", opts: ["Een nuttige bij", "Een organisme dat op of in een ander leeft en daar voordeel van haalt", "Een eetbare paddenstoel", "Een dier dat enkel planten eet"], correct: 1, niveau: 3 },
+  { q: "Wat is een 'pionierplant'?", opts: ["Een plant die als eerste op kale grond groeit", "Een plant met stekels", "Een waterplant", "Een plant die enkel 's nachts bloeit"], correct: 0, niveau: 3 },
+  { q: "Wat is humus?", opts: ["Een soort mos", "Een boomsoort", "Een dier in de bodem", "Vruchtbare laag van verteerde bladeren en plantenresten"], correct: 3, niveau: 3 },
+  { q: "Waarom hebben flamingo's roze veren?", opts: ["Door pigmenten uit hun voedsel", "Ze verven zichzelf", "Door de zon", "Ze worden zo geboren"], correct: 0, niveau: 3 },
+  { q: "Wat vertelt een dansende bij aan de andere bijen?", opts: ["Dat het gaat regenen", "Dat ze honing maakt", "Waar voedsel te vinden is", "Dat ze een partner zoekt"], correct: 2, niveau: 3 },
+  { q: "Welk zoogdier legt eieren?", opts: ["Egel", "Vogelbekdier", "Konijn", "Vleermuis"], correct: 1, niveau: 3 },
+  { q: "Waarom vliegen ganzen in V-vorm?", opts: ["Zo sparen ze energie", "Om mooier te zijn", "Om te kunnen praten", "Zodat jagers hen niet zien"], correct: 0, niveau: 3 },
+  { q: "Wat is het mycelium van een paddenstoel?", opts: ["De hoed", "Het onderaardse draadnetwerk dat voedsel opneemt", "De zaden", "De steel"], correct: 1, niveau: 3 },
+  { q: "Hoe noemen we een groep leeuwen?", opts: ["Zwerm", "Roedel van vissen", "Troep (pride)", "School"], correct: 2, niveau: 3 },
+  { q: "Welk deel van een bloem maakt het stuifmeel?", opts: ["Stamper", "Kelkblad", "Wortel", "Meeldraad (helmknop)"], correct: 3, niveau: 3 },
 ];
 
 function getWaterInfoFallback() {
@@ -750,7 +841,7 @@ export default function App() {
         if (res.gevonden) {
           setSafariStickers((s) => s + 1);
           setSafariBericht(`🎉 ${res.uitleg}`);
-          setSafariOpdracht(pickNextMissionIndex(missieList.length, safariOpdracht));
+          setSafariOpdracht(pickNextMissionIndex(missieList, safariOpdracht, safariOmgeving));
         } else {
           setSafariBericht(`🤔 ${res.uitleg}`);
         }
@@ -799,7 +890,16 @@ export default function App() {
         ? ALL_QUIZ_QUESTIONS
         : ALL_QUIZ_QUESTIONS.filter((q) => q.niveau === gekozenNiveau);
     const aantal = Math.min(10, pool.length);
-    const shuffled = [...pool].sort(() => 0.5 - Math.random()).slice(0, aantal);
+    // Eerst vragen die nog niet gesteld zijn; pas als die op zijn, beginnen we opnieuw voor dit niveau.
+    let seen = loadSeen(QUIZ_SEEN_KEY);
+    let picked = shuffleArray(pool.filter((q) => !seen.includes(q.q))).slice(0, aantal);
+    if (picked.length < aantal) {
+      const rest = shuffleArray(pool.filter((q) => !picked.includes(q)));
+      picked = [...picked, ...rest.slice(0, aantal - picked.length)];
+      seen = seen.filter((t) => !pool.some((q) => q.q === t));
+    }
+    saveSeen(QUIZ_SEEN_KEY, [...seen, ...picked.map((q) => q.q)]);
+    const shuffled = shuffleArray(picked).map(shuffleOptions);
     setCurrentQuizQuestions(shuffled);
     setQuizIndex(0);
     setQuizScore(0);
@@ -1228,14 +1328,14 @@ export default function App() {
               <h3 style={{ color: "#fff", marginTop: 0, fontSize: "26px" }}>Kies je missiegebied!</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
                 {Object.keys(SAFARI_MISSIES).map((omg, i) => (
-                  <button key={omg} onClick={() => { setSafariOmgeving(omg); setSafariOpdracht(Math.floor(Math.random() * SAFARI_MISSIES[omg].length)); }} style={{ backgroundColor: KIDS_COLORS[i % 6], color: "#fff", padding: "16px", border: "none", borderRadius: "16px", fontSize: "17px", fontWeight: "bold", cursor: "pointer", textTransform: "capitalize" }}>
+                  <button key={omg} onClick={() => { setSafariOmgeving(omg); setSafariOpdracht(pickNextMissionIndex(SAFARI_MISSIES[omg], -1, omg)); }} style={{ backgroundColor: KIDS_COLORS[i % 6], color: "#fff", padding: "16px", border: "none", borderRadius: "16px", fontSize: "17px", fontWeight: "bold", cursor: "pointer", textTransform: "capitalize" }}>
                     {omg}
                   </button>
                 ))}
                 {keys.customMissions.length > 0 && (
                   <button
                     key="leerkracht"
-                    onClick={() => { setSafariOmgeving("leerkracht"); setSafariOpdracht(Math.floor(Math.random() * keys.customMissions.length)); }}
+                    onClick={() => { setSafariOmgeving("leerkracht"); setSafariOpdracht(pickNextMissionIndex(keys.customMissions, -1, "leerkracht")); }}
                     style={{ gridColumn: "1 / -1", backgroundColor: "#f1c40f", color: "#3d3300", padding: "16px", border: "none", borderRadius: "16px", fontSize: "17px", fontWeight: "800", cursor: "pointer" }}
                   >
                     🌟 Gouden Knop: Missies van de Juf/Meester!
@@ -1259,7 +1359,7 @@ export default function App() {
                 onClick={() => {
                   const list = getMissieList(safariOmgeving, keys.customMissions);
                   setSafariBericht("");
-                  setSafariOpdracht(pickNextMissionIndex(list.length, safariOpdracht));
+                  setSafariOpdracht(pickNextMissionIndex(list, safariOpdracht, safariOmgeving));
                 }}
                 style={{ background: "rgba(255,255,255,0.1)", color: "#fff", padding: "14px", border: "none", borderRadius: "16px", fontSize: "15px", fontWeight: "700", width: "100%", cursor: "pointer", marginTop: 12 }}
               >
@@ -1448,7 +1548,7 @@ export default function App() {
         <div style={{ ...t.screen, alignItems: "center", justifyContent: "center", textAlign: "center" }}>
           <div style={{ fontSize: 60, marginBottom: 20 }}>🏆</div>
           <div style={{ ...t.title, fontSize: 48 }}>{quizScore} / {currentQuizQuestions.length}</div>
-          <p style={{ fontSize: "20px", fontWeight: 600, marginBottom: "20px" }}>{quizScore >= 4 ? "Geniaal, echte Natuur Ontdekker!" : "Goed gedaan, blijf oefenen!"}</p>
+          <p style={{ fontSize: "20px", fontWeight: 600, marginBottom: "20px" }}>{quizScore / currentQuizQuestions.length >= 0.6 ? "Geniaal, echte Natuur Ontdekker!" : "Goed gedaan, blijf oefenen!"}</p>
           <button style={{ ...t.bigButton, width: "100%" }} onClick={() => startQuiz(quizNiveau)}>🔁 Nog een keer</button>
           <button style={{ ...t.ghostButton, width: "100%" }} onClick={() => setScreen("home")}>← Menu</button>
         </div>
