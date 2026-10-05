@@ -766,7 +766,7 @@ export default function App() {
     if (mode === "animal") {
       try {
         if (!keys.gemini) throw new Error("Gemini API-sleutel ontbreekt.");
-        const res = await callGemini(base64, keys.gemini, `Bioloog. Identificeer dit dier of insect. JSON: {"name":"Naam","scientificName":"Wetenschappelijk","klasse":"Klasse","familie":"Familie","leefgebied":"Habitat","leeftijd":"Schatting leeftijd","weetje":"Leuk weetje."}`);
+        const res = await callGemini(base64, keys.gemini, `Bioloog. Identificeer dit dier of insect, EN beoordeel meteen hoe het dier er op de foto bij lijkt te staan (zichtbare verwondingen, ziektetekens, uitputting, of gewoon gezond) EN geef een korte praktische verzorgings-/omgangstip (bv. wat te doen als je dit dier tegenkomt, hoe ermee om te gaan, of wanneer hulp van een volwassene/dierenarts nodig is). JSON: {"name":"Naam","scientificName":"Wetenschappelijk","klasse":"Klasse","familie":"Familie","leefgebied":"Habitat","leeftijd":"Schatting leeftijd","weetje":"Leuk weetje.","gezond":true/false,"gezondheidsopmerking":"Wat je ziet aan de gezondheid/toestand van het dier op de foto.","verzorgingstip":"Praktisch advies over verzorging/omgang met dit dier."}`);
         const entry = { id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "animal", score: 100, source: "Gemini AI", ...res };
         setHistory(saveHistory([entry, ...history]));
         setResult(entry);
@@ -1158,6 +1158,20 @@ export default function App() {
                 <div style={{ ...t.card, background: "rgba(241, 196, 15, 0.15)" }}>
                   <div style={{ fontWeight: 800, marginBottom: 6, color: "#f1c40f" }}>💡 Leuk weetje</div>
                   <div style={{ fontSize: 15 }}>{result.weetje}</div>
+                </div>
+              )}
+              {typeof result.gezond !== "undefined" && (
+                <div style={{ ...t.card, borderLeft: result.gezond === false ? "6px solid #e74c3c" : "6px solid #2ecc71" }}>
+                  <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>
+                    {result.gezond === false ? "🩺 Gezondheidscheck: Let op" : "✅ Gezondheidscheck: Lijkt gezond"}
+                  </div>
+                  <div style={{ fontSize: 15 }}>{result.gezondheidsopmerking || (result.gezond === false ? "Er lijkt iets niet in orde te zijn." : "Geen zichtbare verwondingen of ziektetekens op de foto.")}</div>
+                </div>
+              )}
+              {result.verzorgingstip && (
+                <div style={t.card}>
+                  <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>🧑‍⚕️ Verzorging & Omgang</div>
+                  <div style={{ fontSize: 15 }}>{result.verzorgingstip}</div>
                 </div>
               )}
             </>
