@@ -309,6 +309,81 @@ function getMissieList(omgeving, customMissions) {
   return SAFARI_MISSIES[omgeving] || [];
 }
 
+/* ============ VOORLEZEN (spraaksynthese van de browser, geen extra kosten of sleutels) ============ */
+const SPEECH_OK = typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+function cleanForSpeech(t) {
+  return String(t || "").replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, " ").replace(/\s+/g, " ").trim();
+}
+function speak(text) {
+  if (!SPEECH_OK) return;
+  const t = cleanForSpeech(text);
+  if (!t) return;
+  try {
+    window.speechSynthesis.cancel();
+    setTimeout(() => {
+      try {
+        const u = new SpeechSynthesisUtterance(t);
+        const voices = window.speechSynthesis.getVoices() || [];
+        const v = voices.find((x) => /^nl[-_]BE/i.test(x.lang)) || voices.find((x) => /^nl/i.test(x.lang));
+        if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
+        u.rate = 0.9;
+        u.pitch = 1.05;
+        window.speechSynthesis.speak(u);
+      } catch (e) {}
+    }, 60);
+  } catch (e) {}
+}
+function stopSpeaking() {
+  try { if (SPEECH_OK) window.speechSynthesis.cancel(); } catch (e) {}
+}
+function VoorleesKnop({ text, label }) {
+  if (!SPEECH_OK) return null;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); speak(text); }}
+      aria-label="Lees voor"
+      style={{ background: "rgba(255,255,255,0.18)", border: "none", borderRadius: 14, padding: "8px 14px", color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginTop: 12 }}
+    >
+      🔊 {label || ""}
+    </button>
+  );
+}
+const LETTERS = ["A", "B", "C", "D", "E"];
+function quizText(q) {
+  return q ? `${q.q} ${q.opts.map((o, i) => `Antwoord ${LETTERS[i]}: ${o}.`).join(" ")}` : "";
+}
+function resultText(r) {
+  if (!r) return "";
+  const p = [`${r.name}.`];
+  if (r.type === "animal") {
+    if (r.klasse) p.push(`Klasse: ${r.klasse}.`);
+    if (r.leefgebied) p.push(`Leefgebied: ${r.leefgebied}.`);
+    if (r.leeftijd) p.push(`Geschatte leeftijd: ${r.leeftijd}.`);
+    if (r.weetje) p.push(`Leuk weetje: ${r.weetje}`);
+    if (typeof r.gezond !== "undefined") {
+      p.push(r.gezond === false ? `Gezondheidscheck: let op. ${r.gezondheidsopmerking || "Er lijkt iets niet in orde te zijn."}` : `Gezondheidscheck: lijkt gezond. ${r.gezondheidsopmerking || ""}`);
+    }
+    if (r.verzorgingstip) p.push(`Verzorging en omgang: ${r.verzorgingstip}`);
+  } else {
+    if (r.light) p.push(`Zonlicht: ${r.light}.`);
+    if (r.soil) p.push(`Bodem: ${r.soil}.`);
+    const h = r.health;
+    if (h && h.isHealthy === false) {
+      p.push("Gezondheidscheck: let op.");
+      if (h.diseaseName) p.push(`Probleem: ${h.diseaseName}.`);
+      if (h.note) p.push(`Oorzaak: ${h.note}`);
+      if (h.solution) p.push(`Oplossing: ${h.solution}`);
+    } else {
+      p.push("Gezondheidscheck: deze plant lijkt gezond. Geen ziektes of problemen gevonden op de foto.");
+    }
+    if (r.freq) p.push(`Water: ${r.freq}.`);
+    if (r.amount) p.push(r.amount);
+    if (r.tip) p.push(`Tip: ${r.tip}`);
+  }
+  return p.join(" ");
+}
+
+
 const ALL_QUIZ_QUESTIONS = [
   // Planten & fotosynthese
   { q: "Welk deel van een plant zet zonlicht om in energie?", opts: ["Wortel", "Blad", "Bloem", "Stengel"], correct: 1 , niveau: 1 },
@@ -591,6 +666,7 @@ export default function App() {
   const [zoomSupported, setZoomSupported] = useState(false);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [voorlezen, setVoorlezen] = useState(localStorage.getItem("natuurscanner_voorlezen") === "1");
 
   useEffect(() => {
     localStorage.setItem(LS_KEYS.kidsMode, kidsMode ? "1" : "0");
@@ -882,6 +958,47 @@ export default function App() {
     }
   };
 
+  // ===== VOORLEZEN: automatisch voorlezen als de schakelaar aan staat =====
+  const berichtRef = useRef("");
+  berichtRef.current = safariBericht;
+  const huidigeMissie = safariOmgeving ? getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht] || "" : "";
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => { stopSpeaking(); }, [screen]);
+  useEffect(() => () => stopSpeaking(), []);
+  useEffect(() => {
+    try { localStorage.setItem("natuurscanner_voorlezen", voorlezen ? "1" : "0"); } catch (e) {}
+    if (!voorlezen) stopSpeaking();
+  }, [voorlezen]);
+  useEffect(() => {
+    if (voorlezen && screen === "safari" && safariOmgeving && !berichtRef.current && huidigeMissie) speak("Jouw missie: " + huidigeMissie);
+  }, [voorlezen, screen, safariOmgeving, safariOpdracht]);
+  useEffect(() => {
+    if (voorlezen && safariBericht) speak(safariBericht + (safariBericht.startsWith("🎉") && huidigeMissie ? " Nieuwe missie: " + huidigeMissie : ""));
+  }, [safariBericht]);
+  useEffect(() => {
+    if (voorlezen && screen === "quiz" && currentQuizQuestions.length > 0) speak(quizText(currentQuizQuestions[quizIndex]));
+  }, [voorlezen, screen, quizIndex, currentQuizQuestions]);
+  useEffect(() => {
+    if (!voorlezen || screen !== "quiz" || quizAnswered === null || !currentQuizQuestions[quizIndex]) return;
+    const q = currentQuizQuestions[quizIndex];
+    speak(quizAnswered === q.correct ? "Goed zo! Dat is juist." : `Helaas. Het juiste antwoord is: ${q.opts[q.correct]}.`);
+  }, [quizAnswered]);
+  useEffect(() => {
+    if (voorlezen && screen === "result" && result) speak(resultText(result));
+  }, [voorlezen, screen, result]);
+  useEffect(() => {
+    if (!voorlezen) return;
+    if (screen === "diploma") speak("Gefeliciteerd! Jij hebt het officiële Natuur Ontdekker Diploma behaald!");
+    if (screen === "quizResult") speak(`Je score is ${quizScore} op ${currentQuizQuestions.length}. ` + (quizScore / currentQuizQuestions.length >= 0.6 ? "Geniaal, echte Natuur Ontdekker!" : "Goed gedaan, blijf oefenen!"));
+  }, [voorlezen, screen]);
+  useEffect(() => {
+    if (voorlezen && screen === "home" && error) speak(friendlyErrorMessage(error));
+  }, [voorlezen, screen, error]);
+  useEffect(() => {
+    if (voorlezen && screen === "loading" && loadingMsg) speak(loadingMsg);
+  }, [voorlezen, screen, loadingMsg]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   const startQuiz = (niveauKeuze) => {
     const gekozenNiveau = niveauKeuze || quizNiveau;
     setQuizNiveau(gekozenNiveau);
@@ -921,7 +1038,7 @@ export default function App() {
         setQuizIndex((idx) => idx + 1);
         setQuizAnswered(null);
       }
-    }, 1500);
+    }, voorlezen ? 4500 : 1500);
   };
 
   const verwijderUitGeschiedenis = (id) => {
@@ -1181,6 +1298,7 @@ export default function App() {
         <>
           <div style={t.topBar}>
             <button style={t.iconBtn} onClick={() => setKidsMode(!kidsMode)}>{kidsMode ? "🧒 Aan" : "🧒 Uit"}</button>
+            {SPEECH_OK && <button style={t.iconBtn} onClick={() => setVoorlezen(!voorlezen)}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
@@ -1188,6 +1306,7 @@ export default function App() {
           {error && (
             <div style={{ background: "rgba(231, 76, 60, 0.9)", color: "#fff", padding: "16px", borderRadius: "16px", marginBottom: "20px", textAlign: "center", fontWeight: "bold" }}>
               <div>⚠️ {friendlyErrorMessage(error)}</div>
+              <VoorleesKnop text={friendlyErrorMessage(error)} label="Lees voor" />
               <button
                 onClick={() => setShowErrorDetails(!showErrorDetails)}
                 style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: 400, textDecoration: "underline", cursor: "pointer", marginTop: 8, padding: 0 }}
@@ -1241,6 +1360,7 @@ export default function App() {
           <img src={result.image} alt="scan" style={t.resultImg} />
           <div style={t.title}>{result.name}</div>
           <div style={t.subtitle}>{result.source} · {result.score}% zekerheid</div>
+          <div style={{ textAlign: "center", marginBottom: 16 }}><VoorleesKnop text={resultText(result)} label="Lees alles voor" /></div>
 
           {result.type === "animal" ? (
             <>
@@ -1350,7 +1470,8 @@ export default function App() {
                 <button onClick={() => setSafariOmgeving(null)} style={{ background: "rgba(255,255,255,0.1)", color: "#fff", borderRadius: "14px", padding: "8px 12px", border: "none", cursor: "pointer" }}>Wissel</button>
               </div>
               <div style={{ backgroundColor: "rgba(255,255,255,0.1)", padding: "24px", borderRadius: "20px", marginBottom: "24px" }}>
-                <p style={{ fontSize: "22px", fontWeight: "bold", color: "#fff", margin: 0 }}>{getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht]}</p>
+                <p style={{ fontSize: "22px", fontWeight: "bold", color: "#fff", margin: 0 }}>{huidigeMissie}</p>
+                <VoorleesKnop text={"Jouw missie: " + huidigeMissie} label="Lees voor" />
               </div>
               <p style={{ fontSize: "24px", margin: "20px 0", color: "#f1c40f", fontWeight: "800" }}>⭐ {safariStickers} Sterren</p>
               {safariBericht && <div style={{ color: "#fff", fontWeight: "bold", fontSize: "16px", backgroundColor: "rgba(231, 76, 60, 0.4)", padding: "14px", borderRadius: "16px", marginBottom: 20 }}>{safariBericht}</div>}
@@ -1526,7 +1647,7 @@ export default function App() {
             <div>Vraag {quizIndex + 1} / {currentQuizQuestions.length}</div>
             <div style={{ color: "#f1c40f", fontWeight: 700 }}>Score: {quizScore}</div>
           </div>
-          <div style={{ ...t.card, marginBottom: 24 }}><div style={{ fontSize: 20, fontWeight: 800 }}>{currentQuizQuestions[quizIndex].q}</div></div>
+          <div style={{ ...t.card, marginBottom: 24 }}><div style={{ fontSize: 20, fontWeight: 800 }}>{currentQuizQuestions[quizIndex].q}</div><VoorleesKnop text={quizText(currentQuizQuestions[quizIndex])} label="Lees voor" /></div>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {currentQuizQuestions[quizIndex].opts.map((opt, i) => {
               let bg = "rgba(255,255,255,0.1)", border = "1px solid rgba(255,255,255,0.2)", icon = "";
@@ -1549,6 +1670,7 @@ export default function App() {
           <div style={{ fontSize: 60, marginBottom: 20 }}>🏆</div>
           <div style={{ ...t.title, fontSize: 48 }}>{quizScore} / {currentQuizQuestions.length}</div>
           <p style={{ fontSize: "20px", fontWeight: 600, marginBottom: "20px" }}>{quizScore / currentQuizQuestions.length >= 0.6 ? "Geniaal, echte Natuur Ontdekker!" : "Goed gedaan, blijf oefenen!"}</p>
+          <VoorleesKnop text={`Je score is ${quizScore} op ${currentQuizQuestions.length}.`} label="Lees voor" />
           <button style={{ ...t.bigButton, width: "100%" }} onClick={() => startQuiz(quizNiveau)}>🔁 Nog een keer</button>
           <button style={{ ...t.ghostButton, width: "100%" }} onClick={() => setScreen("home")}>← Menu</button>
         </div>
