@@ -126,6 +126,30 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 13000) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+/* Zet een technische foutmelding om naar een korte, geruststellende boodschap
+   voor kinderen. De volledige, technische tekst gaat nergens verloren — die
+   blijft gewoon beschikbaar achter het "Technische details"-knopje in de
+   foutmelding zelf, voor wie (bv. de leerkracht) toch de exacte oorzaak wil
+   zien. Dit raakt alleen hoe de bestaande foutmelding getoond wordt, niet de
+   logica die de fouten zelf veroorzaakt of opvangt. */
+function friendlyErrorMessage(raw) {
+  if (!raw) return "";
+  const text = raw.toLowerCase();
+  if (text.includes("sleutel ontbreekt") || text.includes("geen gemini") || text.includes("api sleutel ingesteld") || text.includes("api-sleutel ingesteld")) {
+    return "🔑 Er ontbreekt een instelling. Vraag een volwassene om dit in ⚙️ Instellingen te bekijken.";
+  }
+  if (text.includes("429") || text.includes("rate_limit") || text.includes("503") || text.includes("druk") || text.includes("high demand") || text.includes("antwoordde niet binnen")) {
+    return "😴 De scanner is even moe, probeer over een paar minuutjes opnieuw!";
+  }
+  if (text.includes("niet bereikbaar") || text.includes("failed to fetch") || text.includes("networkerror")) {
+    return "📶 Geen internetverbinding gevonden, check de wifi.";
+  }
+  if (text.includes("niet herkend") || text.includes("geen plant gevonden") || text.includes("geen dier")) {
+    return "🔍 Hmm, ik zie hier geen plant of dier op! Probeer een andere foto.";
+  }
+  return "😕 Er ging iets mis. Probeer het nog eens!";
+}
+
 const logApiCall = (firebaseUrl) => {
   const now = Date.now();
   try {
@@ -446,6 +470,7 @@ export default function App() {
   const [history, setHistory] = useState(loadHistory());
   const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState("");
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [result, setResult] = useState(null);
   const [liveApiUsage, setLiveApiUsage] = useState(0);
 
@@ -711,6 +736,7 @@ export default function App() {
   
   const processImage = async (dataUrl, mode) => {
     setError("");
+    setShowErrorDetails(false);
     setScreen("loading");
     setLoadingMsg("Analyseren...");
     const base64 = dataUrl.split(",")[1];
@@ -1059,7 +1085,20 @@ export default function App() {
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
 
-          {error && <div style={{ background: "rgba(231, 76, 60, 0.9)", color: "#fff", padding: "16px", borderRadius: "16px", marginBottom: "20px", textAlign: "center", fontWeight: "bold" }}>⚠️ {error}</div>}
+          {error && (
+            <div style={{ background: "rgba(231, 76, 60, 0.9)", color: "#fff", padding: "16px", borderRadius: "16px", marginBottom: "20px", textAlign: "center", fontWeight: "bold" }}>
+              <div>⚠️ {friendlyErrorMessage(error)}</div>
+              <button
+                onClick={() => setShowErrorDetails(!showErrorDetails)}
+                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: 400, textDecoration: "underline", cursor: "pointer", marginTop: 8, padding: 0 }}
+              >
+                {showErrorDetails ? "Verberg technische details" : "Technische details (voor de leerkracht)"}
+              </button>
+              {showErrorDetails && (
+                <div style={{ fontSize: 12, fontWeight: 400, marginTop: 8, opacity: 0.85, textAlign: "left", wordBreak: "break-word" }}>{error}</div>
+              )}
+            </div>
+          )}
 
           <div style={t.title}>{kidsMode ? "🌿 NatuurScanner" : "🌿 PlantScanner"}</div>
           <div style={t.subtitle}>{kidsMode ? "Ontdek en leer over de natuur!" : "Identificeer planten en dieren."}</div>
@@ -1308,8 +1347,26 @@ export default function App() {
       {/* LOADING */}
       {screen === "loading" && (
         <div style={{ ...t.screen, alignItems: "center", justifyContent: "center" }}>
-          <div style={{ fontSize: 60, marginBottom: 24 }}>🌱</div>
-          <div style={{ fontSize: 18, color: "#fff", fontWeight: 600 }}>{loadingMsg}</div>
+          <style>{`
+            @keyframes scannerPulse {
+              0%, 100% { transform: scale(1) rotate(-6deg); }
+              50% { transform: scale(1.15) rotate(6deg); }
+            }
+            @keyframes scannerDot {
+              0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+              40% { opacity: 1; transform: translateY(-6px); }
+            }
+          `}</style>
+          <div style={{ fontSize: 60, marginBottom: 24, animation: "scannerPulse 1.4s ease-in-out infinite" }}>🌱</div>
+          <div style={{ fontSize: 18, color: "#fff", fontWeight: 600, textAlign: "center" }}>{loadingMsg}</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: "#2ecc71", animation: "scannerDot 1.2s infinite ease-in-out", animationDelay: `${i * 0.2}s` }} />
+            ))}
+          </div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 20, textAlign: "center", maxWidth: 260 }}>
+            Dit kan tot 30 seconden duren. Geen zorgen, de scanner is nog bezig! 🔎
+          </div>
         </div>
       )}
 
