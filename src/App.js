@@ -310,6 +310,7 @@ function getMissieList(omgeving, customMissions) {
 }
 
 /* ============ VOORLEZEN (spraaksynthese van de browser, geen extra kosten of sleutels) ============ */
+let SPEECH_RATE = 0.9; // 0.9 = normaal, 0.7 = langzaam (voor kinderen die nog leren lezen)
 const SPEECH_OK = typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 function cleanForSpeech(t) {
   return String(t || "").replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, " ").replace(/\s+/g, " ").trim();
@@ -332,7 +333,7 @@ function speak(text) {
           if (!p) return;
           const u = new SpeechSynthesisUtterance(p);
           if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
-          u.rate = 0.9;
+          u.rate = SPEECH_RATE;
           u.pitch = 1.05;
           synth.speak(u);
         });
@@ -673,6 +674,7 @@ export default function App() {
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
   const [zoomLevel, setZoomLevel] = useState(1);
   const [voorlezen, setVoorlezen] = useState(localStorage.getItem("natuurscanner_voorlezen") === "1");
+  const [tempo, setTempo] = useState(localStorage.getItem("natuurscanner_voorleestempo") === "langzaam" ? "langzaam" : "normaal");
 
   useEffect(() => {
     localStorage.setItem(LS_KEYS.kidsMode, kidsMode ? "1" : "0");
@@ -970,6 +972,10 @@ export default function App() {
   const huidigeMissie = safariOmgeving ? getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht] || "" : "";
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => { stopSpeaking(); }, [screen]);
+  useEffect(() => {
+    SPEECH_RATE = tempo === "langzaam" ? 0.7 : 0.9;
+    try { localStorage.setItem("natuurscanner_voorleestempo", tempo); } catch (e) {}
+  }, [tempo]);
   useEffect(() => () => stopSpeaking(), []);
   useEffect(() => {
     try { localStorage.setItem("natuurscanner_voorlezen", voorlezen ? "1" : "0"); } catch (e) {}
@@ -1305,6 +1311,7 @@ export default function App() {
           <div style={t.topBar}>
             <button style={t.iconBtn} onClick={() => setKidsMode(!kidsMode)}>{kidsMode ? "🧒 Aan" : "🧒 Uit"}</button>
             {SPEECH_OK && <button style={t.iconBtn} onClick={() => { const nv = !voorlezen; setVoorlezen(nv); if (nv) speak("Voorlezen staat aan."); else stopSpeaking(); }}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
+            {SPEECH_OK && voorlezen && <button style={t.iconBtn} onClick={() => { const nt = tempo === "langzaam" ? "normaal" : "langzaam"; SPEECH_RATE = nt === "langzaam" ? 0.7 : 0.9; setTempo(nt); speak(nt === "langzaam" ? "Ik praat nu langzaam." : "Ik praat nu normaal."); }}>{tempo === "langzaam" ? "🐢 Traag" : "🐇 Normaal"}</button>}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
