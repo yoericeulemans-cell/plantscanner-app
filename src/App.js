@@ -385,6 +385,7 @@ function resultText(r) {
     } else {
       p.push("Gezondheidscheck: deze plant lijkt gezond. Geen ziektes of problemen gevonden op de foto.");
     }
+    p.push(giftTekst(r.giftigheid, !!r.__kids));
     if (r.freq) p.push(`Water: ${r.freq}.`);
     if (r.amount) p.push(r.amount);
     if (r.tip) p.push(`Tip: ${r.tip}`);
@@ -392,6 +393,76 @@ function resultText(r) {
   return p.join(" ");
 }
 
+
+/* ============ GIFTIGHEID (planten) ============ */
+const GIFT_RANK = { onbekend: 0, niet: 1, licht: 2, matig: 3, sterk: 4 };
+const GIFT_LABEL = { niet: ["✅", "Niet giftig", "#2ecc71"], licht: ["🟡", "Licht giftig", "#f1c40f"], matig: ["🟠", "Giftig", "#e67e22"], sterk: ["🔴", "Zeer giftig", "#e74c3c"], onbekend: ["❓", "Onbekend", "#95a5a6"] };
+// Vaste, veilige basisraad (komt NIET van de AI): wat te doen na contact met een mogelijk giftige plant.
+const GIFT_NA_CONTACT = [
+  "Huid: wassen met water en zeep.",
+  "Ogen: minstens 15 minuten spoelen met lauw water.",
+  "Mond of ingeslikt: spoel de mond met water en laat niet braken.",
+  "Bel het Antigifcentrum: 070 245 245 (dag en nacht) en volg het advies. Bij ernstige klachten of bewusteloosheid: bel 112.",
+  "Huisdier: bel meteen de dierenarts en neem een stukje van de plant mee.",
+];
+function normGift(g) {
+  if (!g || typeof g !== "object") return null;
+  const lv = (x) => { const v = String(x || "").toLowerCase().trim(); return GIFT_RANK[v] !== undefined ? v : "onbekend"; };
+  return { mens: lv(g.mens), dier: lv(g.dier), delen: String(g.delen || "").slice(0, 200), symptomen: String(g.symptomen || "").slice(0, 300), omgang: String(g.omgang || "").slice(0, 300) };
+}
+function giftInfo(g) {
+  const gg = g || { mens: "onbekend", dier: "onbekend", delen: "", symptomen: "", omgang: "" };
+  const gevaar = GIFT_RANK[gg.mens] >= 2 || GIFT_RANK[gg.dier] >= 2;
+  const onbekend = gg.mens === "onbekend" || gg.dier === "onbekend";
+  const top = GIFT_RANK[gg.mens] >= GIFT_RANK[gg.dier] ? gg.mens : gg.dier;
+  const kleur = gevaar ? GIFT_LABEL[top][2] : onbekend ? GIFT_LABEL.onbekend[2] : GIFT_LABEL.niet[2];
+  return { gg, gevaar, onbekend, kleur };
+}
+function giftTekst(g, kids) {
+  const { gg, gevaar, onbekend } = giftInfo(g);
+  const p = [`Giftigheid. Voor mensen: ${GIFT_LABEL[gg.mens][1]}. Voor huisdieren, zoals katten en honden: ${GIFT_LABEL[gg.dier][1]}.`];
+  if (gg.delen) p.push(`Giftige delen: ${gg.delen}.`);
+  if (gevaar) {
+    if (gg.symptomen) p.push(`Mogelijke klachten: ${gg.symptomen}.`);
+    if (gg.omgang) p.push(`Zo ga je ermee om: ${gg.omgang}.`);
+    p.push("Na contact: " + GIFT_NA_CONTACT.join(" "));
+  } else if (onbekend) {
+    p.push("Raak de plant niet aan zonder te vragen en eet er nooit van. " + GIFT_NA_CONTACT.join(" "));
+  } else {
+    p.push("Veilig om aan te raken, maar eet nooit zomaar van een plant. Toch last gehad? Bel het Antigifcentrum: 070 245 245.");
+  }
+  if (kids) p.push("Vraag altijd aan een volwassene voor je iets van een plant aanraakt of in je mond steekt.");
+  p.push("Dit is een inschatting op basis van een foto en niet 100 procent zeker.");
+  return p.join(" ");
+}
+function GiftigKaart({ g, kids, cardStyle }) {
+  const { gg, gevaar, onbekend, kleur } = giftInfo(g);
+  const rij = (icoon, naam, lvl) => (<div style={{ marginTop: 4 }}><strong>{icoon} {naam}:</strong> {GIFT_LABEL[lvl][0]} {GIFT_LABEL[lvl][1]}</div>);
+  return (
+    <div style={{ ...cardStyle, borderLeft: `6px solid ${kleur}` }}>
+      <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>{kids ? "⚠️ Is deze plant giftig?" : "⚠️ Giftigheid"}</div>
+      <div style={{ fontSize: 15, lineHeight: "1.6" }}>
+        {rij("👤", "Mensen", gg.mens)}
+        {rij("🐾", "Huisdieren (kat/hond)", gg.dier)}
+        {gg.delen && <div style={{ marginTop: 8 }}><strong>🌿 Giftige delen:</strong> {gg.delen}</div>}
+        {gevaar && gg.symptomen && <div style={{ marginTop: 8 }}><strong>🤒 Mogelijke klachten:</strong> {gg.symptomen}</div>}
+        {gevaar && gg.omgang && <div style={{ marginTop: 8 }}><strong>🧤 Zo ga je ermee om:</strong> {gg.omgang}</div>}
+        {!gevaar && !onbekend && <div style={{ marginTop: 8 }}>👍 Veilig om aan te raken. Eet toch nooit zomaar van een plant.</div>}
+        {!gevaar && onbekend && <div style={{ marginTop: 8 }}>❓ Raak de plant niet aan zonder te vragen en eet er nooit van.</div>}
+        {(gevaar || onbekend) && (
+          <div style={{ marginTop: 10, background: "rgba(231, 76, 60, 0.15)", padding: 12, borderRadius: 12 }}>
+            <strong>🚑 Na contact: wat doe je?</strong>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>{GIFT_NA_CONTACT.map((x, i) => <li key={i}>{x}</li>)}</ul>
+          </div>
+        )}
+        {!gevaar && !onbekend && <div style={{ marginTop: 8, fontSize: 13, opacity: 0.8 }}>Toch last gehad? Bel het Antigifcentrum: 070 245 245.</div>}
+        {kids && <div style={{ marginTop: 10, fontWeight: 700 }}>👨‍👩‍👧 Vraag altijd aan een volwassene voor je iets van een plant aanraakt of in je mond steekt!</div>}
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>Een inschatting op basis van een foto en AI, niet 100% zeker.</div>
+      </div>
+      <VoorleesKnop text={giftTekst(g, kids)} label="Lees voor" />
+    </div>
+  );
+}
 
 const ALL_QUIZ_QUESTIONS = [
   // Planten & fotosynthese
@@ -996,7 +1067,7 @@ export default function App() {
     speak(quizAnswered === q.correct ? "Goed zo! Dat is juist." : `Helaas. Het juiste antwoord is: ${q.opts[q.correct]}.`);
   }, [quizAnswered]);
   useEffect(() => {
-    if (voorlezen && screen === "result" && result) speak(resultText(result));
+    if (voorlezen && screen === "result" && result) speak(resultText({ ...result, __kids: kidsMode }));
   }, [voorlezen, screen, result]);
   useEffect(() => {
     if (!voorlezen) return;
@@ -1175,7 +1246,7 @@ export default function App() {
       ? callGemini(
           base64,
           gemini,
-          `Je bent een plantenexpert. Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck. JSON: {"name":"Naam","gezond":true/false,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":""}`,
+          `Je bent een plantenexpert. Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck EN een giftigheidscheck. Antwoord in eenvoudig Nederlands. JSON: {"name":"Naam","gezond":true/false,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":"","giftig":{"mens":"niet|licht|matig|sterk|onbekend","dier":"niet|licht|matig|sterk|onbekend","delen":"welke delen giftig zijn","symptomen":"mogelijke klachten, kort","omgang":"hoe ga je ermee om, bv. handschoenen of handen wassen"}} Bij giftig: dier betekent katten en honden. Weet je het niet zeker, antwoord onbekend. Gok nooit.`,
           35000
         ).catch((e) => {
           errors.push(`Gemini: ${e.message}`);
@@ -1249,7 +1320,7 @@ export default function App() {
       throw new Error("Geen plant gevonden." + detail);
     }
 
-    return { name: plantName, score, source, ...careData, health: healthData };
+    return { name: plantName, score, source, ...careData, health: healthData, giftigheid: normGift(gRes && gRes.giftig) };
   }
 
   const t = kidsMode ? ks : s;
@@ -1373,7 +1444,7 @@ export default function App() {
           <img src={result.image} alt="scan" style={t.resultImg} />
           <div style={t.title}>{result.name}</div>
           <div style={t.subtitle}>{result.source} · {result.score}% zekerheid</div>
-          <div style={{ textAlign: "center", marginBottom: 16 }}><VoorleesKnop text={resultText(result)} label="Lees alles voor" /></div>
+          <div style={{ textAlign: "center", marginBottom: 16 }}><VoorleesKnop text={resultText({ ...result, __kids: kidsMode })} label="Lees alles voor" /></div>
 
           {result.type === "animal" ? (
             <>
@@ -1429,6 +1500,8 @@ export default function App() {
                   <div style={{ fontSize: 15 }}>Deze plant lijkt gezond! Geen ziektes of problemen gevonden op de foto.</div>
                 )}
               </div>
+
+              <GiftigKaart g={result.giftigheid} kids={kidsMode} cardStyle={t.card} />
 
               <div style={t.card}>
                 <div style={{ fontWeight: 800, marginBottom: 12, color: "#a8e6cf", fontSize: 18 }}>💧 Water Schema</div>
