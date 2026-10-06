@@ -319,18 +319,26 @@ function speak(text) {
   const t = cleanForSpeech(text);
   if (!t) return;
   try {
-    window.speechSynthesis.cancel();
-    setTimeout(() => {
+    const synth = window.speechSynthesis;
+    const busy = synth.speaking || synth.pending;
+    synth.cancel();
+    const go = () => {
       try {
-        const u = new SpeechSynthesisUtterance(t);
-        const voices = window.speechSynthesis.getVoices() || [];
+        const voices = synth.getVoices() || [];
         const v = voices.find((x) => /^nl[-_]BE/i.test(x.lang)) || voices.find((x) => /^nl/i.test(x.lang));
-        if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
-        u.rate = 0.9;
-        u.pitch = 1.05;
-        window.speechSynthesis.speak(u);
+        // Zin per zin voorlezen: lange teksten blijven dan niet halverwege hangen.
+        (t.match(/[^.!?]+[.!?]*/g) || [t]).forEach((part) => {
+          const p = part.trim();
+          if (!p) return;
+          const u = new SpeechSynthesisUtterance(p);
+          if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
+          u.rate = 0.9;
+          u.pitch = 1.05;
+          synth.speak(u);
+        });
       } catch (e) {}
-    }, 60);
+    };
+    if (busy) setTimeout(go, 60); else go();
   } catch (e) {}
 }
 function stopSpeaking() {
@@ -517,13 +525,11 @@ const ALL_QUIZ_QUESTIONS = [
   { q: "Wat is biodiversiteit?", opts: ["Een soort plastic", "De verscheidenheid aan planten en dieren in een gebied", "Een soort weer", "Een moestuintechniek"], correct: 1, niveau: 3 },
   { q: "Waarom is het goed om inheemse (van nature bij ons voorkomende) planten in je tuin te zetten?", opts: ["Ze trekken lokale insecten en vogels beter aan", "Ze zijn altijd goedkoper", "Ze hebben geen water nodig", "Geen enkele reden"], correct: 0, niveau: 3 },
   // Extra vragen: dieren, bos, park, dierentuin (v2)
-  { q: "Hoeveel poten heeft een spin?", opts: ["6", "8", "4", "10"], correct: 1, niveau: 1 },
   { q: "Hoe heet het jong van een kikker?", opts: ["Rups", "Kikkervisje", "Pop", "Veulen"], correct: 1, niveau: 1 },
   { q: "Welke vrucht groeit aan een eik?", opts: ["Dennenappel", "Kastanje", "Eikel", "Beukennootje"], correct: 2, niveau: 1 },
   { q: "Wat eet een panda bijna uitsluitend?", opts: ["Vis", "Bamboe", "Insecten", "Fruit"], correct: 1, niveau: 1 },
   { q: "Welk dier heeft de langste nek?", opts: ["Olifant", "Kameel", "Struisvogel", "Giraffe"], correct: 3, niveau: 1 },
   { q: "Wat is het grootste landdier?", opts: ["Neushoorn", "Giraffe", "Afrikaanse olifant", "Nijlpaard"], correct: 2, niveau: 1 },
-  { q: "Waarom zijn bijen belangrijk?", opts: ["Ze bestuiven bloemen en planten", "Ze eten luizen", "Ze maken de grond los", "Ze maken de lucht schoner"], correct: 0, niveau: 1 },
   { q: "Welk dier is het snelste op het land?", opts: ["Leeuw", "Paard", "Cheeta", "Struisvogel"], correct: 2, niveau: 2 },
   { q: "Hoe noemen we een groep wolven?", opts: ["Roedel", "Zwerm", "School", "Kudde"], correct: 0, niveau: 2 },
   { q: "Wat zit er in de bult van een kameel?", opts: ["Water", "Lucht", "Spieren", "Vet"], correct: 3, niveau: 2 },
@@ -544,7 +550,7 @@ const ALL_QUIZ_QUESTIONS = [
   { q: "Welk zoogdier legt eieren?", opts: ["Egel", "Vogelbekdier", "Konijn", "Vleermuis"], correct: 1, niveau: 3 },
   { q: "Waarom vliegen ganzen in V-vorm?", opts: ["Zo sparen ze energie", "Om mooier te zijn", "Om te kunnen praten", "Zodat jagers hen niet zien"], correct: 0, niveau: 3 },
   { q: "Wat is het mycelium van een paddenstoel?", opts: ["De hoed", "Het onderaardse draadnetwerk dat voedsel opneemt", "De zaden", "De steel"], correct: 1, niveau: 3 },
-  { q: "Hoe noemen we een groep leeuwen?", opts: ["Zwerm", "Roedel van vissen", "Troep (pride)", "School"], correct: 2, niveau: 3 },
+  { q: "Hoe noemen we een groep leeuwen?", opts: ["Zwerm", "Kudde", "Troep (pride)", "School"], correct: 2, niveau: 3 },
   { q: "Welk deel van een bloem maakt het stuifmeel?", opts: ["Stamper", "Kelkblad", "Wortel", "Meeldraad (helmknop)"], correct: 3, niveau: 3 },
 ];
 
@@ -1298,7 +1304,7 @@ export default function App() {
         <>
           <div style={t.topBar}>
             <button style={t.iconBtn} onClick={() => setKidsMode(!kidsMode)}>{kidsMode ? "🧒 Aan" : "🧒 Uit"}</button>
-            {SPEECH_OK && <button style={t.iconBtn} onClick={() => setVoorlezen(!voorlezen)}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
+            {SPEECH_OK && <button style={t.iconBtn} onClick={() => { const nv = !voorlezen; setVoorlezen(nv); if (nv) speak("Voorlezen staat aan."); else stopSpeaking(); }}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
