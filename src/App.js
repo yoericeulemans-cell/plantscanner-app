@@ -338,6 +338,11 @@ function pickVoice() {
   const list = nlVoices();
   return list.find((v) => v.name === SPEECH_VOICE_NAME) || list[0] || null;
 }
+function stemUitleg(list, alle) {
+  const tip = "Tip: ga naar de Instellingen van je toestel → Tekst-naar-spraak (vaak onder Algemeen beheer → Taal, of onder Toegankelijkheid). Kies daar een andere engine (Google of Samsung) of een andere Nederlandse stem en kom dan terug naar de app.";
+  if (list.length === 0) return `Geen Nederlandse stem gevonden (${alle.length} stemmen in totaal). ${tip}`;
+  return `Er is maar 1 Nederlandse stem: ${list[0].name} (${list[0].lang}). ${tip}`;
+}
 function speak(text) {
   if (!SPEECH_OK) return;
   const t = cleanForSpeech(text);
@@ -768,6 +773,7 @@ export default function App() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [voorlezen, setVoorlezen] = useState(localStorage.getItem("natuurscanner_voorlezen") === "1");
   const [voiceTick, setVoiceTick] = useState(0);
+  const [stemInfo, setStemInfo] = useState("");
   const [tempo, setTempo] = useState(localStorage.getItem("natuurscanner_voorleestempo") === "langzaam" ? "langzaam" : "normaal");
 
   useEffect(() => {
@@ -1065,6 +1071,17 @@ export default function App() {
   berichtRef.current = safariBericht;
   const huidigeMissie = safariOmgeving ? getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht] || "" : "";
   /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (!SPEECH_OK) return;
+    let tries = 0; let last = -1;
+    const iv = setInterval(() => {
+      tries++;
+      let n = 0; try { n = (window.speechSynthesis.getVoices() || []).length; } catch (e) {}
+      if (n !== last) { last = n; setVoiceTick((x) => x + 1); }
+      if (tries >= 12) clearInterval(iv);
+    }, 500);
+    return () => clearInterval(iv);
+  }, []);
   useEffect(() => {
     if (!SPEECH_OK) return;
     const f = () => setVoiceTick((x) => x + 1);
@@ -1412,13 +1429,19 @@ export default function App() {
             <button style={t.iconBtn} onClick={() => setKidsMode(!kidsMode)}>{kidsMode ? "🧒 Aan" : "🧒 Uit"}</button>
             {SPEECH_OK && <button style={t.iconBtn} onClick={() => { const nv = !voorlezen; setVoorlezen(nv); if (nv) speak("Voorlezen staat aan."); else stopSpeaking(); }}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
             {SPEECH_OK && voorlezen && <button style={t.iconBtn} onClick={() => { const nt = tempo === "langzaam" ? "normaal" : "langzaam"; SPEECH_RATE = nt === "langzaam" ? 0.7 : 0.9; setTempo(nt); speak(nt === "langzaam" ? "Ik praat nu langzaam." : "Ik praat nu normaal."); }}>{tempo === "langzaam" ? "🐢 Traag" : "🐇 Normaal"}</button>}
-            {SPEECH_OK && voorlezen && voiceTick >= 0 && nlVoices().length >= 2 && (() => {
+            {SPEECH_OK && voorlezen && voiceTick >= 0 && (() => {
               const list = nlVoices(); const cur = pickVoice(); const idx = Math.max(0, list.findIndex((v) => cur && v.name === cur.name));
-              return <button style={t.iconBtn} onClick={() => { const ni = (idx + 1) % list.length; SPEECH_VOICE_NAME = list[ni].name; try { localStorage.setItem("natuurscanner_stem", SPEECH_VOICE_NAME); } catch (e) {} setVoiceTick((x) => x + 1); speak(`Stem ${ni + 1} van ${list.length}. Zo klink ik nu.`); }}>🗣️ Stem {idx + 1}/{list.length}</button>;
+              const alle = (() => { try { return window.speechSynthesis.getVoices() || []; } catch (e) { return []; } })();
+              return <button style={t.iconBtn} onClick={() => {
+                if (list.length >= 2) { const ni = (idx + 1) % list.length; SPEECH_VOICE_NAME = list[ni].name; try { localStorage.setItem("natuurscanner_stem", SPEECH_VOICE_NAME); } catch (e) {} setStemInfo(""); setVoiceTick((x) => x + 1); speak(`Stem ${ni + 1} van ${list.length}. Zo klink ik nu.`); }
+                else { setStemInfo(stemUitleg(list, alle)); speak(list.length === 1 ? "Er is maar één Nederlandse stem op dit toestel." : "Er is geen Nederlandse stem gevonden op dit toestel."); }
+              }}>🗣️ Stem{list.length >= 2 ? ` ${idx + 1}/${list.length}` : ""}</button>;
             })()}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
+
+          {stemInfo && (<div onClick={() => setStemInfo("")} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 14, padding: 12, margin: "0 0 14px", fontSize: 13, lineHeight: 1.5 }}>🗣️ {stemInfo}<div style={{ opacity: 0.7, marginTop: 6 }}>(tik om te sluiten)</div></div>)}
 
           {error && (
             <div style={{ background: "rgba(231, 76, 60, 0.9)", color: "#fff", padding: "16px", borderRadius: "16px", marginBottom: "20px", textAlign: "center", fontWeight: "bold" }}>
