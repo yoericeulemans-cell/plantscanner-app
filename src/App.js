@@ -315,6 +315,29 @@ const SPEECH_OK = typeof window !== "undefined" && "speechSynthesis" in window &
 function cleanForSpeech(t) {
   return String(t || "").replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, " ").replace(/\s+/g, " ").trim();
 }
+let SPEECH_PITCH = 0.8; // lagere toon = dieper
+let SPEECH_VOICE_NAME = (() => { try { return localStorage.getItem("natuurscanner_stem") || ""; } catch (e) { return ""; } })();
+// Geeft elke Nederlandse stem een score: liefst mannelijk en natuurlijk (neural/online/network), geen robotstem.
+function voiceScore(v) {
+  const n = (v.name || "") + " " + (v.voiceURI || "");
+  const lang = (v.lang || "").replace("_", "-").toLowerCase();
+  if (!lang.startsWith("nl")) return -999;
+  let sc = lang === "nl-be" ? 1 : 0;
+  if (/maarten|xander|arnaud|\bmale\b|\bman\b|ruben|pieter|bart|jan\b/i.test(n)) sc += 10;
+  if (/ellen|claire|colette|fenna|femke|\bfemale\b|vrouw|laura|eline/i.test(n)) sc -= 10;
+  if (/natural|neural|online|network|premium|enhanced|wavenet/i.test(n)) sc += 4;
+  if (/compact|espeak|robot/i.test(n)) sc -= 4;
+  return sc;
+}
+function nlVoices() {
+  try {
+    return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
+  } catch (e) { return []; }
+}
+function pickVoice() {
+  const list = nlVoices();
+  return list.find((v) => v.name === SPEECH_VOICE_NAME) || list[0] || null;
+}
 function speak(text) {
   if (!SPEECH_OK) return;
   const t = cleanForSpeech(text);
@@ -325,8 +348,7 @@ function speak(text) {
     synth.cancel();
     const go = () => {
       try {
-        const voices = synth.getVoices() || [];
-        const v = voices.find((x) => /^nl[-_]BE/i.test(x.lang)) || voices.find((x) => /^nl/i.test(x.lang));
+        const v = pickVoice();
         // Zin per zin voorlezen: lange teksten blijven dan niet halverwege hangen.
         (t.match(/[^.!?]+[.!?]*/g) || [t]).forEach((part) => {
           const p = part.trim();
@@ -334,7 +356,7 @@ function speak(text) {
           const u = new SpeechSynthesisUtterance(p);
           if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
           u.rate = SPEECH_RATE;
-          u.pitch = 1.05;
+          u.pitch = SPEECH_PITCH;
           synth.speak(u);
         });
       } catch (e) {}
@@ -745,6 +767,7 @@ export default function App() {
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
   const [zoomLevel, setZoomLevel] = useState(1);
   const [voorlezen, setVoorlezen] = useState(localStorage.getItem("natuurscanner_voorlezen") === "1");
+  const [voiceTick, setVoiceTick] = useState(0);
   const [tempo, setTempo] = useState(localStorage.getItem("natuurscanner_voorleestempo") === "langzaam" ? "langzaam" : "normaal");
 
   useEffect(() => {
@@ -1042,6 +1065,12 @@ export default function App() {
   berichtRef.current = safariBericht;
   const huidigeMissie = safariOmgeving ? getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht] || "" : "";
   /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (!SPEECH_OK) return;
+    const f = () => setVoiceTick((x) => x + 1);
+    try { window.speechSynthesis.addEventListener?.("voiceschanged", f); } catch (e) {}
+    return () => { try { window.speechSynthesis.removeEventListener?.("voiceschanged", f); } catch (e) {} };
+  }, []);
   useEffect(() => { stopSpeaking(); }, [screen]);
   useEffect(() => {
     SPEECH_RATE = tempo === "langzaam" ? 0.7 : 0.9;
@@ -1383,6 +1412,10 @@ export default function App() {
             <button style={t.iconBtn} onClick={() => setKidsMode(!kidsMode)}>{kidsMode ? "🧒 Aan" : "🧒 Uit"}</button>
             {SPEECH_OK && <button style={t.iconBtn} onClick={() => { const nv = !voorlezen; setVoorlezen(nv); if (nv) speak("Voorlezen staat aan."); else stopSpeaking(); }}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
             {SPEECH_OK && voorlezen && <button style={t.iconBtn} onClick={() => { const nt = tempo === "langzaam" ? "normaal" : "langzaam"; SPEECH_RATE = nt === "langzaam" ? 0.7 : 0.9; setTempo(nt); speak(nt === "langzaam" ? "Ik praat nu langzaam." : "Ik praat nu normaal."); }}>{tempo === "langzaam" ? "🐢 Traag" : "🐇 Normaal"}</button>}
+            {SPEECH_OK && voorlezen && voiceTick >= 0 && nlVoices().length >= 2 && (() => {
+              const list = nlVoices(); const cur = pickVoice(); const idx = Math.max(0, list.findIndex((v) => cur && v.name === cur.name));
+              return <button style={t.iconBtn} onClick={() => { const ni = (idx + 1) % list.length; SPEECH_VOICE_NAME = list[ni].name; try { localStorage.setItem("natuurscanner_stem", SPEECH_VOICE_NAME); } catch (e) {} setVoiceTick((x) => x + 1); speak(`Stem ${ni + 1} van ${list.length}. Zo klink ik nu.`); }}>🗣️ Stem {idx + 1}/{list.length}</button>;
+            })()}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
           </div>
