@@ -138,6 +138,10 @@ function friendlyErrorMessage(raw) {
   if (text.includes("sleutel ontbreekt") || text.includes("geen gemini") || text.includes("api sleutel ingesteld") || text.includes("api-sleutel ingesteld")) {
     return "🔑 Er ontbreekt een instelling. Vraag een volwassene om dit in ⚙️ Instellingen te bekijken.";
   }
+  const compact = text.replace(/[\s_-]/g, "");
+  if (compact.includes("perday") || compact.includes("dailylimit") || compact.includes("dagelijks")) {
+    return "🌙 De scanner heeft voor vandaag genoeg gewerkt. Probeer het morgen opnieuw! (Volwassene: het dagelijkse limiet van Gemini is bereikt.)";
+  }
   if (text.includes("429") || text.includes("rate_limit") || text.includes("503") || text.includes("druk") || text.includes("high demand") || text.includes("antwoordde niet binnen")) {
     return "😴 De scanner is even moe, probeer over een paar minuutjes opnieuw!";
   }
@@ -728,7 +732,7 @@ const s = {
     boxSizing: "border-box",
     textAlign: "center",
   },
-  topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 },
   iconBtn: { background: "rgba(255, 255, 255, 0.1)", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: 16, padding: "12px 16px", color: "#fff" },
   input: { width: "100%", padding: "16px", borderRadius: 16, border: "1px solid rgba(255, 255, 255, 0.3)", background: "rgba(0, 0, 0, 0.2)", color: "#fff", fontSize: 16, marginBottom: 16 },
   label: { fontSize: 14, opacity: 0.9, marginBottom: 8, display: "block", fontWeight: 600 },
@@ -1045,7 +1049,7 @@ export default function App() {
         }
         setTimeout(() => setSafariBericht(""), 5000);
       } catch (err) {
-        setError("Safari controle mislukt.");
+        setError("Safari controle mislukt. " + (err && err.message ? err.message : ""));
       }
       setScanMode("general");
       setScreen("safari");
@@ -1211,7 +1215,7 @@ export default function App() {
   async function callGemini(base64, apiKey, prompt, timeoutMs = 35000) {
     if (!apiKey) throw new Error("Geen Gemini API sleutel ingesteld.");
 
-    const maxAttempts = 2; // 1 poging + 1 automatische herkansing bij tijdelijke drukte
+    const maxAttempts = 3; // 1 poging + 2 automatische herkansingen bij tijdelijke drukte (503/429)
     let lastErr;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1226,6 +1230,7 @@ export default function App() {
         lastErr = e.name === "AbortError"
           ? new Error(`Gemini antwoordde niet binnen ${Math.round(timeoutMs / 1000)}s.`)
           : new Error(`Gemini niet bereikbaar: ${e.message}`);
+        if (attempt >= 2) throw lastErr; // bij time-out/netwerkfout maximaal 1 herkansing (anders wacht een kind veel te lang)
         if (attempt < maxAttempts) {
           setLoadingMsg("Verbinding mislukt, nieuwe poging...");
           await new Promise((r) => setTimeout(r, 1500));
@@ -1235,13 +1240,13 @@ export default function App() {
 
       if (!res.ok) {
         let detail = "";
-        try { detail = (await res.text()).slice(0, 150); } catch (e) {}
+        try { detail = (await res.text()).slice(0, 500); } catch (e) {}
         lastErr = new Error(`API Fout (${res.status})${detail ? ": " + detail : ""}`);
         // 503 (te druk) en 429 (rate limit) zijn meestal tijdelijk — Google raadt
         // zelf aan het gewoon nog eens te proberen. Eén keer opnieuw na 2,5s.
-        if ((res.status === 503 || res.status === 429) && attempt < maxAttempts) {
+        if ((res.status === 503 || res.status === 429) && !/perday|dailylimit/.test(detail.toLowerCase().replace(/[\s_-]/g, "")) && attempt < maxAttempts) {
           setLoadingMsg("Gemini heeft het even druk, nieuwe poging...");
-          await new Promise((r) => setTimeout(r, 2500));
+          await new Promise((r) => setTimeout(r, 2500 * attempt));
           continue;
         }
         throw lastErr;
