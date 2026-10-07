@@ -334,14 +334,27 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-function pickVoice() {
-  const list = nlVoices();
-  return list.find((v) => v.name === SPEECH_VOICE_NAME) || list[0] || null;
+const APP_VERSIE = "ontwikkel · stem-v3";
+// Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
+// het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
+function stemOpties() {
+  return [
+    ...nlVoices().map((v) => ({ id: v.name, voice: v, lang: v.lang, label: v.name })),
+    { id: "__sys_BE", voice: null, lang: "nl-BE", label: "systeemstem (nl-BE)" },
+    { id: "__sys_NL", voice: null, lang: "nl-NL", label: "systeemstem (nl-NL)" },
+  ];
 }
-function stemUitleg(list, alle) {
-  const tip = "Tip: ga naar de Instellingen van je toestel → Tekst-naar-spraak (vaak onder Algemeen beheer → Taal, of onder Toegankelijkheid). Kies daar een andere engine (Google of Samsung) of een andere Nederlandse stem en kom dan terug naar de app.";
-  if (list.length === 0) return `Geen Nederlandse stem gevonden (${alle.length} stemmen in totaal). ${tip}`;
-  return `Er is maar 1 Nederlandse stem: ${list[0].name} (${list[0].lang}). ${tip}`;
+function pickOption() {
+  const opts = stemOpties();
+  const gekozen = opts.find((o) => o.id === SPEECH_VOICE_NAME);
+  if (gekozen) return gekozen;
+  const eerste = opts[0];
+  // Alleen een stem afdwingen als we zeker weten dat het een mannenstem is; anders kiest het toestel zelf.
+  return eerste.voice && voiceScore(eerste.voice) >= 10 ? eerste : opts.find((o) => o.id === "__sys_BE");
+}
+function stemUitleg(o, ni, n, alle) {
+  const lijst = alle.length ? alle.map((v) => v.name + " (" + v.lang + ")").join(", ") : "geen";
+  return `Stem ${ni + 1} van ${n}: ${o.label}. Stemmen die dit toestel doorgeeft (${alle.length}): ${lijst}. Versie: ${APP_VERSIE}. Tip: voor meer keuze installeer je een andere Nederlandse stem of engine in Instellingen → Tekst-naar-spraak.`;
 }
 function speak(text) {
   if (!SPEECH_OK) return;
@@ -353,13 +366,14 @@ function speak(text) {
     synth.cancel();
     const go = () => {
       try {
-        const v = pickVoice();
+        const o = pickOption();
+        const v = o.voice;
         // Zin per zin voorlezen: lange teksten blijven dan niet halverwege hangen.
         (t.match(/[^.!?]+[.!?]*/g) || [t]).forEach((part) => {
           const p = part.trim();
           if (!p) return;
           const u = new SpeechSynthesisUtterance(p);
-          if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "nl-BE"; }
+          if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = o.lang; }
           u.rate = SPEECH_RATE;
           u.pitch = SPEECH_PITCH;
           synth.speak(u);
@@ -1430,12 +1444,14 @@ export default function App() {
             {SPEECH_OK && <button style={t.iconBtn} onClick={() => { const nv = !voorlezen; setVoorlezen(nv); if (nv) speak("Voorlezen staat aan."); else stopSpeaking(); }}>{voorlezen ? "🔊 Aan" : "🔇 Uit"}</button>}
             {SPEECH_OK && voorlezen && <button style={t.iconBtn} onClick={() => { const nt = tempo === "langzaam" ? "normaal" : "langzaam"; SPEECH_RATE = nt === "langzaam" ? 0.7 : 0.9; setTempo(nt); speak(nt === "langzaam" ? "Ik praat nu langzaam." : "Ik praat nu normaal."); }}>{tempo === "langzaam" ? "🐢 Traag" : "🐇 Normaal"}</button>}
             {SPEECH_OK && voorlezen && voiceTick >= 0 && (() => {
-              const list = nlVoices(); const cur = pickVoice(); const idx = Math.max(0, list.findIndex((v) => cur && v.name === cur.name));
-              const alle = (() => { try { return window.speechSynthesis.getVoices() || []; } catch (e) { return []; } })();
+              const opts = stemOpties(); const cur = pickOption(); const idx = Math.max(0, opts.findIndex((o) => o.id === cur.id));
               return <button style={t.iconBtn} onClick={() => {
-                if (list.length >= 2) { const ni = (idx + 1) % list.length; SPEECH_VOICE_NAME = list[ni].name; try { localStorage.setItem("natuurscanner_stem", SPEECH_VOICE_NAME); } catch (e) {} setStemInfo(""); setVoiceTick((x) => x + 1); speak(`Stem ${ni + 1} van ${list.length}. Zo klink ik nu.`); }
-                else { setStemInfo(stemUitleg(list, alle)); speak(list.length === 1 ? "Er is maar één Nederlandse stem op dit toestel." : "Er is geen Nederlandse stem gevonden op dit toestel."); }
-              }}>🗣️ Stem{list.length >= 2 ? ` ${idx + 1}/${list.length}` : ""}</button>;
+                const ni = (idx + 1) % opts.length; SPEECH_VOICE_NAME = opts[ni].id;
+                try { localStorage.setItem("natuurscanner_stem", SPEECH_VOICE_NAME); } catch (e) {}
+                const alle = (() => { try { return window.speechSynthesis.getVoices() || []; } catch (e) { return []; } })();
+                setStemInfo(stemUitleg(opts[ni], ni, opts.length, alle)); setVoiceTick((x) => x + 1);
+                speak(`Stem ${ni + 1} van ${opts.length}. Zo klink ik nu.`);
+              }}>🗣️ Stem {idx + 1}/{opts.length}</button>;
             })()}
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "bold", color: liveApiUsage >= 15 ? "#ff6b6b" : "#2ecc71" }}>📊 {liveApiUsage}/15</div>
             <button style={t.iconBtn} onClick={() => { setPinInput(""); setPinError(""); setScreen(settingsUnlocked ? "keys" : "pinGate"); }}>⚙️ Instellingen</button>
@@ -1461,6 +1477,7 @@ export default function App() {
 
           <div style={t.title}>{kidsMode ? "🌿 NatuurScanner" : "🌿 PlantScanner"}</div>
           <div style={t.subtitle}>{kidsMode ? "Ontdek en leer over de natuur!" : "Identificeer planten en dieren."}</div>
+          <div style={{ textAlign: "center", fontSize: 11, opacity: 0.45, marginTop: -6, marginBottom: 8 }}>v: {APP_VERSIE}</div>
 
           <button style={t.bigButton} onClick={() => openCamera("general")}>🌱 Scan Plant (Camera)</button>
           <button style={{ ...t.bigButton, background: "linear-gradient(135deg, #3498db 0%, #2980b9 100%)" }} onClick={() => openCamera("animal")}>🦋 Scan Dier (Camera)</button>
