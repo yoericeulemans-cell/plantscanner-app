@@ -338,7 +338,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · stem-v3";
+const APP_VERSIE = "ontwikkel · v4";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -1262,6 +1262,9 @@ export default function App() {
 
   async function identifyPlant(base64) {
     const { plantId, plantNet, gemini } = keys;
+    // Zonder enige sleutel kan geen enkele bron werken: toon dan de melding "er ontbreekt een instelling"
+    // in plaats van het misleidende "ik zie hier geen plant".
+    if (!plantId && !plantNet && !gemini) throw new Error("Geen API-sleutel ingesteld. Vul een sleutel in bij Instellingen.");
 
     // Alle beschikbare bronnen worden nu TEGELIJK aangeroepen in plaats van
     // na elkaar (was: Plant.id → wachten → PlantNet → wachten → Gemini
@@ -1381,7 +1384,7 @@ export default function App() {
     }
 
     if (!plantName) {
-      const detail = errors.length ? " — " + errors.join(" · ") : " (geen enkele sleutel ingesteld of alle bronnen gaven niets terug)";
+      const detail = errors.length ? " — " + errors.join(" · ") : " (alle bronnen gaven niets terug)";
       throw new Error("Geen plant gevonden." + detail);
     }
 
