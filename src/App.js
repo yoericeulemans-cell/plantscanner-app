@@ -62,23 +62,28 @@ function saveKeys(keysObj) {
 
 function loadHistory() {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEYS.history)) || [];
+    const l = JSON.parse(localStorage.getItem(LS_KEYS.history));
+    return Array.isArray(l) ? l.filter((x) => x && typeof x === "object").map(cleanEntry) : [];
   } catch {
     return [];
   }
 }
 
 function saveHistory(list) {
+  // Geeft de lijst terug die ECHT is opgeslagen. Eerst valt telkens de oudste scan weg; blijft het te groot,
+  // dan vallen er meer tegelijk weg. Kan er helemaal niets bewaard worden (opslag geblokkeerd), dan blijft de lijst
+  // alleen in het geheugen staan zodat de scan tijdens dit bezoek zichtbaar blijft.
   let wList = list;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; ; i++) {
     try {
       localStorage.setItem(LS_KEYS.history, JSON.stringify(wList));
       return wList;
     } catch (e) {
-      wList = wList.slice(0, -1);
+      if (wList.length === 0) return list;
+      const drop = i < 10 ? 1 : Math.max(1, Math.ceil(wList.length * 0.1));
+      wList = wList.slice(0, Math.max(0, wList.length - drop));
     }
   }
-  return wList;
 }
 
 /* Verkleint een foto (dataURL) vóór verzending naar de API's. Foto's uit de
@@ -338,7 +343,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v5";
+const APP_VERSIE = "ontwikkel · v6";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -457,7 +462,7 @@ function normGift(g) {
   return { mens: lv(g.mens), dier: lv(g.dier), delen: String(g.delen || "").slice(0, 200), symptomen: String(g.symptomen || "").slice(0, 300), omgang: String(g.omgang || "").slice(0, 300) };
 }
 function giftInfo(g) {
-  const gg = g || { mens: "onbekend", dier: "onbekend", delen: "", symptomen: "", omgang: "" };
+  const gg = normGift(g) || { mens: "onbekend", dier: "onbekend", delen: "", symptomen: "", omgang: "" };
   const gevaar = GIFT_RANK[gg.mens] >= 2 || GIFT_RANK[gg.dier] >= 2;
   const onbekend = gg.mens === "onbekend" || gg.dier === "onbekend";
   const top = GIFT_RANK[gg.mens] >= GIFT_RANK[gg.dier] ? gg.mens : gg.dier;
@@ -510,6 +515,49 @@ function GiftigKaart({ g, kids, cardStyle }) {
   );
 }
 
+/* ============ VEILIGE GEGEVENS + FOUTSCHERM ============ */
+// Alles wat als tekst getoond wordt, wordt tot tekst gemaakt: een object of lijst van de AI (of uit een back-up)
+// mag het scherm nooit laten crashen.
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join(", ");
+  if (typeof v === "object") return Object.values(v).map(asText).filter(Boolean).join(" · ");
+  return "";
+}
+const TEKST_VELDEN = ["name", "date", "source", "light", "soil", "freq", "amount", "tip", "scientificName", "klasse", "familie", "leefgebied", "leeftijd", "weetje", "gezondheidsopmerking", "verzorgingstip"];
+function cleanEntry(e) {
+  if (!e || typeof e !== "object") return e;
+  const o = { ...e };
+  for (const k of TEKST_VELDEN) if (k in o && typeof o[k] !== "string") o[k] = asText(o[k]);
+  if ("health" in o) {
+    const h = o.health;
+    o.health = h && typeof h === "object" ? { ...h, diseaseName: asText(h.diseaseName), note: asText(h.note), solution: asText(h.solution) } : null;
+  }
+  if ("giftigheid" in o) o.giftigheid = normGift(o.giftigheid);
+  return o;
+}
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { fout: null, poging: 0 }; }
+  static getDerivedStateFromError(fout) { return { fout }; }
+  componentDidCatch(fout, info) { try { console.error("NatuurScanner fout:", fout, info && info.componentStack); } catch (e) { /* niets */ } }
+  render() {
+    if (this.state.fout) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 24, background: "#0f3d4a", color: "#fff", fontFamily: "sans-serif" }}>
+          <div style={{ fontSize: 56 }}>😕</div>
+          <div style={{ fontSize: 24, fontWeight: 800, margin: "12px 0" }}>Oeps, er ging iets mis</div>
+          <div style={{ maxWidth: 420, lineHeight: 1.6, marginBottom: 20 }}>Geen paniek: je scans zijn nog bewaard. Ga terug naar het startscherm en probeer het opnieuw.</div>
+          <button style={{ padding: "16px 28px", borderRadius: 18, border: "none", background: "#2ecc71", color: "#fff", fontSize: 18, fontWeight: 800, cursor: "pointer" }} onClick={() => this.setState({ fout: null, poging: this.state.poging + 1 })}>🏠 Terug naar start</button>
+          <details style={{ marginTop: 20, opacity: 0.7, maxWidth: 420 }}><summary>Technische details (voor de leerkracht)</summary><div style={{ fontSize: 12, marginTop: 8, wordBreak: "break-word" }}>{String(this.state.fout && this.state.fout.message ? this.state.fout.message : this.state.fout)}</div></details>
+        </div>
+      );
+    }
+    return <React.Fragment key={this.state.poging}>{this.props.children}</React.Fragment>;
+  }
+}
+
 /* ============ EETWAARSCHUWING ============ */
 const FUNGI_RE = /paddenstoel|zwam|schimmel|champignon|boleet|boletus|russula|cantharel|cantharellus|amaniet|amanita|eekhoorntjesbrood|truffel|bovist|plooirokje|fungus|fungi|mushroom|agaricus/i;
 function isPaddenstoel(name) { return FUNGI_RE.test(String(name || "")); }
@@ -538,11 +586,11 @@ function parseBackup(text) {
   const lijst = Array.isArray(d) ? d : d && d.app === "NatuurScanner" && Array.isArray(d.scans) ? d.scans : null;
   if (!lijst) return { ok: false, fout: "Dit bestand is geen NatuurScanner-back-up." };
   const scans = lijst.filter((x) => x && typeof x === "object" && x.id != null && typeof x.name === "string" && (x.type === "plant" || x.type === "animal") && typeof x.image === "string" && x.image.startsWith("data:image/"));
-  return { ok: true, scans, overgeslagen: lijst.length - scans.length };
+  return { ok: true, scans: scans.map(cleanEntry), overgeslagen: lijst.length - scans.length };
 }
 function mergeHistory(huidig, nieuw) {
   const ids = new Set(huidig.map((h) => String(h.id)));
-  const toe = nieuw.filter((n) => !ids.has(String(n.id)));
+  const toe = nieuw.filter((n) => { const k = String(n.id); if (ids.has(k)) return false; ids.add(k); return true; });
   const lijst = [...huidig, ...toe].sort((a, b) => Number(b.id) - Number(a.id));
   return { lijst, toegevoegd: toe.length, alAanwezig: nieuw.length - toe.length };
 }
@@ -775,7 +823,7 @@ const ALL_QUIZ_QUESTIONS = [
   { q: "Wat gebeurt er in de herfst met het chlorofyl in een blad?", opts: ["Het wordt afgebroken, zodat andere kleuren zichtbaar worden", "Het verdwijnt omdat het blad bevriest", "Het wordt omgezet in water", "Het blijft altijd even groen"], correct: 0, niveau: 3, weetje: "De gele en oranje kleuren zaten er al in, maar werden verborgen door het groen." },
   { q: "Hoe heten de minuscule openingen in een blad waar gassen in en uit gaan?", opts: ["Huidmondjes", "Wortelharen", "Nerven", "Kelkbladeren"], correct: 0, niveau: 3, weetje: "Op één blad kunnen duizenden huidmondjes zitten, vooral aan de onderkant." },
   { q: "Welke naaldboom verliest zijn naalden wel in de herfst?", opts: ["Lork", "Spar", "Den", "Taxus"], correct: 0, niveau: 3, weetje: "De naalden van een lork worden goudgeel voor ze vallen." },
-  { q: "Hoe planten varens zich voort?", opts: ["Met sporen", "Met zaden in een vrucht", "Met bloemen en nectar", "Met knollen onder de grond"], correct: 0, niveau: 3, weetje: "Varens hebben geen bloemen of zaden; de sporen zitten vaak als bruine stipjes onder de bladeren." },
+  { q: "Waarmee vermenigvuldigen varens zich?", opts: ["Met sporen", "Met zaden in een vrucht", "Met bloemen en nectar", "Met knollen onder de grond"], correct: 0, niveau: 3, weetje: "Varens hebben geen bloemen of zaden; de sporen zitten vaak als bruine stipjes onder de bladeren." },
   { q: "Welke plant leeft op takken van bomen en haalt daar water en mineralen uit?", opts: ["Maretak", "Klimop", "Brandnetel", "Mos"], correct: 0, niveau: 3, weetje: "De maretak heeft ook groene blaadjes en maakt dus zelf suiker. Eet de witte bessen nooit: ze zijn giftig voor mensen." },
   { q: "Tot welke groep dieren horen spinnen?", opts: ["Spinachtigen", "Insecten", "Kreeftachtigen", "Duizendpoten"], correct: 0, niveau: 3, weetje: "Net als mijten en teken zijn spinnen spinachtigen, geen insecten." },
   { q: "Wat is een metamorfose?", opts: ["Een dier verandert helemaal van vorm tijdens zijn leven", "Een dier wisselt van huid", "Een dier gaat op reis", "Een dier eet iets anders"], correct: 0, niveau: 3, weetje: "Een rups wordt een vlinder en een kikkervisje een kikker: beide maken een metamorfose door." },
@@ -882,7 +930,7 @@ const ks = {
   ghostButton: { ...s.ghostButton, borderRadius: 24, fontSize: 18 },
 };
 
-export default function App() {
+function AppInner() {
   const [screen, setScreen] = useState("home");
   const [keys, setKeys] = useState(loadKeys());
   const [kidsMode, setKidsMode] = useState(localStorage.getItem(LS_KEYS.kidsMode) === "1");
@@ -1178,7 +1226,7 @@ export default function App() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
       setOpslagVol(false);
       setBackupBericht(`✅ Back-up met ${history.length} scans gemaakt. Bewaar het bestand op een veilige plek.`);
     } catch (err) {
@@ -1238,7 +1286,7 @@ export default function App() {
       try {
         if (!keys.gemini) throw new Error("Gemini API-sleutel ontbreekt.");
         const res = await callGemini(base64, keys.gemini, `Bioloog. Identificeer dit dier of insect, EN beoordeel meteen hoe het dier er op de foto bij lijkt te staan (zichtbare verwondingen, ziektetekens, uitputting, of gewoon gezond) EN geef een korte praktische verzorgings-/omgangstip (bv. wat te doen als je dit dier tegenkomt, hoe ermee om te gaan, of wanneer hulp van een volwassene/dierenarts nodig is). JSON: {"name":"Naam","scientificName":"Wetenschappelijk","klasse":"Klasse","familie":"Familie","leefgebied":"Habitat","leeftijd":"Schatting leeftijd","weetje":"Leuk weetje.","gezond":true/false,"gezondheidsopmerking":"Wat je ziet aan de gezondheid/toestand van het dier op de foto.","verzorgingstip":"Praktisch advies over verzorging/omgang met dit dier."}`);
-        const entry = { id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "animal", score: null, source: "Gemini AI", ...res };
+        const entry = cleanEntry({ id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "animal", score: null, source: "Gemini AI", ...res });
         await bewaarScan(entry);
         setResult(entry);
         setScreen("result");
@@ -1582,7 +1630,7 @@ export default function App() {
       throw new Error("Geen plant gevonden." + detail);
     }
 
-    return { name: plantName, score, source, ...careData, health: healthData, giftigheid: normGift(gRes && gRes.giftig) };
+    return cleanEntry({ name: plantName, score, source, ...careData, health: healthData, giftigheid: normGift(gRes && gRes.giftig) });
   }
 
   const t = kidsMode ? ks : s;
@@ -2083,5 +2131,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
   );
 }
