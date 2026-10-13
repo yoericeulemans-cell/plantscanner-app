@@ -313,8 +313,75 @@ function pickNextMissionIndex(list, excludeIndex, omgeving) {
 
 // Geeft de juiste missielijst terug voor een omgeving, inclusief de speciale
 // "leerkracht"-categorie (de missies die de leerkracht zelf heeft toegevoegd).
+/* ============ SEIZOENSMISSIES ============ */
+const SAFARI_SEIZOEN = {
+  "lente": [
+    "🌱 Zoek een boom of struik met knoppen of net uitgekomen blaadjes",
+    "🌼 Vind een gele bloem, zoals een paardenbloem of speenkruid",
+    "🐝 Zoek een bij of hommel op een bloem",
+    "🦋 Zoek een vlinder in de lentezon",
+    "🌸 Zoek een boom of struik met bloesem",
+    "🐦 Vind een vogel die zingt of op een tak zit",
+    "🐜 Zoek een mier of een rij mieren",
+    "🌿 Vind een plantje dat net uit de grond komt",
+    "🍃 Zoek heel jonge, lichtgroene blaadjes",
+    "🌷 Zoek een bloem die in een bolletje onder de grond heeft gewacht, zoals een narcis of krokus",
+    "🪲 Zoek een kriebelbeestje onder een steen of blad (zet alles weer netjes terug)",
+    "🌳 Vind een boom en kijk goed naar zijn knoppen"
+  ],
+  "zomer": [
+    "🐝 Zoek een bloem waar een bij of hommel op zit",
+    "🦋 Zoek een vlinder in de zon",
+    "🫐 Vind een plant met bessen of vruchtjes (kijken, niet eten!)",
+    "🐞 Zoek een lieveheersbeestje of een ander klein kevertje",
+    "🌳 Vind een plek in de schaduw onder een grote boom",
+    "🌾 Zoek een grashalm met zaadjes of een pluizige zaadbol",
+    "🕷️ Zoek een spin in haar web",
+    "🦗 Zoek een sprinkhaan of krekel in het gras",
+    "🌻 Vind een zonnebloem, roos of lavendel",
+    "🐦 Zoek een zwaluw of mus in de lucht of op een draad",
+    "☘️ Zoek een klaver of een plantje met drie blaadjes",
+    "💧 Zoek een libel of waterjuffer bij het water (blijf op een veilige afstand van de rand)"
+  ],
+  "herfst": [
+    "🍂 Zoek een gevallen blad in een mooie herfstkleur",
+    "🌰 Vind een eikel, kastanje of beukennootje",
+    "🍄 Zoek een paddenstoel (raak hem niet aan en eet hem nooit!)",
+    "🐿️ Zoek een eekhoorn of een gaai die voedsel verzamelt",
+    "🕸️ Vind een spinnenweb met dauwdruppels",
+    "🌳 Zoek een boom die al bijna kale takken heeft",
+    "🍒 Zoek bessen aan een struik (kijken, niet eten!)",
+    "🐦 Zoek een roodborstje of een andere vogel in de tuin",
+    "🍁 Zoek een hoop bladeren waar dieren zich kunnen verstoppen",
+    "🌼 Zoek een plant die ondanks de herfst nog bloeit",
+    "🐌 Zoek een slak op een vochtige plek",
+    "🌲 Vind een dennenappel"
+  ],
+  "winter": [
+    "🌳 Zoek een boom zonder blaadjes en bekijk zijn takken",
+    "🌿 Vind een plant die in de winter groen blijft, zoals klimop of een den",
+    "🐦 Zoek vogels die komen eten bij een voederplek",
+    "🐾 Zoek sporen of pootafdrukken in de sneeuw of de modder",
+    "🌱 Zoek een knop aan een tak die wacht tot de lente",
+    "❄️ Zoek een sneeuwklokje, krokus of een andere vroege bloem",
+    "🐦 Zoek een merel of roodborstje in de tuin",
+    "🟢 Zoek mos op een boom of muur",
+    "🧊 Zoek rijp of ijs op een plant (blijf altijd van bevroren water af!)",
+    "🌲 Zoek een dennenappel of een eikel op de grond",
+    "🪺 Zoek een vogelnest in een kale boom (kijk van ver en laat het met rust)",
+    "🍃 Zoek een plantje dat zelfs in de winter groen blijft, zoals gras of mos"
+  ]
+};
+const SEIZOEN_NAAM = { lente: "Lente", zomer: "Zomer", herfst: "Herfst", winter: "Winter" };
+const SEIZOEN_ICOON = { lente: "🌷", zomer: "☀️", herfst: "🍂", winter: "❄️" };
+function huidigSeizoen(d) {
+  const m = (d instanceof Date ? d : new Date()).getMonth();   // 0 = januari
+  return m >= 2 && m <= 4 ? "lente" : m >= 5 && m <= 7 ? "zomer" : m >= 8 && m <= 10 ? "herfst" : "winter";
+}
+
 function getMissieList(omgeving, customMissions) {
   if (omgeving === "leerkracht") return customMissions || [];
+  if (omgeving === "seizoen") return SAFARI_SEIZOEN[huidigSeizoen()] || [];
   return SAFARI_MISSIES[omgeving] || [];
 }
 
@@ -343,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v6";
+const APP_VERSIE = "ontwikkel · v7";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -414,6 +481,7 @@ function quizText(q) {
 function resultText(r) {
   if (!r) return "";
   const p = [`${r.name}.`];
+  gevaarWaarschuwingen(r.name).forEach((g) => p.push(`Let op: ${g.titel}. ${g.tekst}`));
   if (r.type === "animal") {
     if (r.klasse) p.push(`Klasse: ${r.klasse}.`);
     if (r.leefgebied) p.push(`Leefgebied: ${r.leefgebied}.`);
@@ -556,6 +624,36 @@ class ErrorBoundary extends React.Component {
     }
     return <React.Fragment key={this.state.poging}>{this.props.children}</React.Fragment>;
   }
+}
+
+/* ============ GEVAARLIJKE EN INVASIEVE SOORTEN IN BELGIË (op naam herkend) ============ */
+const GEVAAR_SOORTEN = [
+  { ernst: "gevaar", icoon: "🌿", re: /berenklauw|heracleum/i, titel: "Berenklauw: niet aanraken", tekst: "Het sap van reuzenberenklauw kan samen met zonlicht pijnlijke blaren en brandwonden geven, en ook gewone berenklauw kan de huid irriteren. Raak de plant niet aan en laat geen sap op je huid komen. Gebeurd het toch? Spoel de huid goed met water en zeep, houd de plek uit de zon en ga naar een dokter. Bij ernstige klachten bel je 112." },
+  { ernst: "gevaar", icoon: "☠️", re: /scheerling|conium/i, titel: "Scheerling: zeer giftig", tekst: "Scheerling is zeer giftig en lijkt op wilde peen en kervel. Eet er nooit van, pluk hem niet en was je handen na aanraking. Heb je er toch van gegeten, of twijfel je? Bel meteen het Antigifcentrum 070 245 245, of 112 bij nood." },
+  { ernst: "gevaar", icoon: "🐛", re: /processierups|thaumetopoea/i, titel: "Processierups: niet aanraken", tekst: "De fijne haartjes van processierupsen kunnen jeuk, uitslag, pijnlijke ogen en soms ademhalingsklachten geven. Blijf uit de buurt van de rupsen en hun nesten en raak ze niet aan. Last gehad? Spoel de huid met water, doe de kleren in de was en vraag een volwassene om hulp of bel de huisarts. Heb je moeite met ademen, bel dan 112." },
+  { ernst: "gevaar", icoon: "🐝", re: /hoornaar|vespa crabro|vespa velutina/i, titel: "Hoornaar: blijf weg van het nest", tekst: "Blijf uit de buurt van nesten en sla niet naar de dieren. Een steek kan pijnlijk zijn en is gevaarlijk bij een allergie. Ga rustig weg en vertel het aan een volwassene. Bij een dik gezicht of een dikke keel, of moeilijk ademen: bel meteen 112." },
+  { ernst: "gevaar", icoon: "🕷️", re: /teek\b|teken\b|ixodes/i, titel: "Teek: haal hem snel weg", tekst: "Teken kunnen ziektes overbrengen, zoals de ziekte van Lyme. Laat een volwassene de teek zo snel mogelijk met een tekentang verwijderen en de plek ontsmetten. Let de weken erna op een rode ring of koorts: ga dan naar de dokter." },
+  { ernst: "invasief", icoon: "🚫", re: /japanse duizendknoop|sachalinse duizendknoop|boheemse duizendknoop|reynoutria|fallopia/i, titel: "Invasieve soort", tekst: "Duizendknoop uit Azië is een invasieve plant die onze inheemse planten verdringt en uit kleine stukjes weer kan groeien. Verspreid hem niet en doe snoeiafval niet op de composthoop. Vraag een volwassene hoe je het veilig afvoert." },
+  { ernst: "invasief", icoon: "🚫", re: /reuzenbalsemien|himalayabalsemien|impatiens glandulifera/i, titel: "Invasieve soort", tekst: "Reuzenbalsemien verspreidt zich razendsnel met springende zaden en verdringt inheemse planten. Help hem niet verspreiden en vertel het aan een volwassene." },
+  { ernst: "invasief", icoon: "🐸", re: /stierkikker|lithobates|rana catesbeiana/i, titel: "Invasieve soort", tekst: "De Amerikaanse stierkikker komt oorspronkelijk uit Noord-Amerika en verdringt onze eigen kikkers. Raak hem niet aan en vertel het aan een volwassene." },
+];
+function gevaarWaarschuwingen(name) {
+  const n = String(name || "");
+  return GEVAAR_SOORTEN.filter((g) => g.re.test(n)).slice(0, 2);
+}
+function GevaarKaart({ name, cardStyle }) {
+  const lijst = gevaarWaarschuwingen(name);
+  if (lijst.length === 0) return null;
+  return (
+    <>
+      {lijst.map((g) => (
+        <div key={g.titel} style={{ ...cardStyle, borderLeft: `6px solid ${g.ernst === "gevaar" ? "#e74c3c" : "#3498db"}` }}>
+          <div style={{ fontWeight: 800, marginBottom: 6, color: g.ernst === "gevaar" ? "#ff6b6b" : "#74b9ff", fontSize: 17 }}>{g.icoon} {g.titel}</div>
+          <div style={{ fontSize: 14, lineHeight: "1.6" }}>{g.tekst}</div>
+        </div>
+      ))}
+    </>
+  );
 }
 
 /* ============ EETWAARSCHUWING ============ */
@@ -1771,6 +1869,8 @@ function AppInner() {
           <div style={t.subtitle}>{result.source === "Gemini AI" || result.score == null ? `${result.source} · AI-schatting, controleer altijd` : `${result.source} · ${result.score}% zekerheid`}</div>
           <div style={{ textAlign: "center", marginBottom: 16 }}><VoorleesKnop text={resultText({ ...result, __kids: kidsMode })} label="Lees alles voor" /></div>
 
+          <GevaarKaart name={result.name} cardStyle={t.card} />
+
           {result.type === "animal" ? (
             <>
               <div style={t.card}>
@@ -1864,6 +1964,7 @@ function AppInner() {
                     {omg}
                   </button>
                 ))}
+                <button key="seizoen" onClick={() => { setSafariOmgeving("seizoen"); setSafariOpdracht(pickNextMissionIndex(getMissieList("seizoen"), -1, "seizoen-" + huidigSeizoen())); }} style={{ gridColumn: "1 / -1", backgroundColor: "#8e44ad", color: "#fff", padding: "16px", border: "none", borderRadius: "16px", fontSize: "17px", fontWeight: "800", cursor: "pointer" }}>{SEIZOEN_ICOON[huidigSeizoen()]} {SEIZOEN_NAAM[huidigSeizoen()]}-missies</button>
                 {keys.customMissions.length > 0 && (
                   <button
                     key="leerkracht"
