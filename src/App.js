@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v7";
+const APP_VERSIE = "ontwikkel · v8";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -728,16 +728,22 @@ function klasseCanon(k) {
   return null;
 }
 function buildScanQuiz(list) {
+  // Rekentijd blijft laag, ook bij honderden scans: er worden maximaal 10 soorten gekozen die een vraag krijgen.
   const album = bouwAlbum(list);
-  const vragen = [];
+  const lc = (x) => String(x).trim().toLowerCase();
   const namen = album.map((a) => a.name);
-  for (const a of album) {
+  const vragen = [];
+  for (const a of shuffleArray(album).slice(0, 10)) {
     const r = a.laatste;
     const weetje = r.type === "animal" ? (r.weetje || "") : (r.tip ? `Tip bij deze plant: ${r.tip}` : "");
     // 1. Welke soort is dit? (met je eigen foto)
-    const afleiders = shuffleArray([...namen, ...SCAN_NAMEN_REST].filter((n) => String(n).trim().toLowerCase() !== String(a.name).trim().toLowerCase()))
-      .filter((n, i, arr) => arr.findIndex((m) => String(m).toLowerCase() === String(n).toLowerCase()) === i)
-      .slice(0, 3);
+    const gebruikt = new Set([lc(a.name)]);
+    const afleiders = [];
+    for (const n of shuffleArray([...namen, ...SCAN_NAMEN_REST])) {
+      if (afleiders.length >= 3) break;
+      if (gebruikt.has(lc(n))) continue;
+      gebruikt.add(lc(n)); afleiders.push(n);
+    }
     const opts = shuffleArray([a.name, ...afleiders]);
     vragen.push({ q: "Welke soort heb jij hier gescand?", opts, correct: opts.indexOf(a.name), niveau: 1, image: r.image, weetje });
     // 2. Dierengroep
@@ -2180,7 +2186,7 @@ function AppInner() {
             <button onClick={() => startQuiz(1)} style={{ backgroundColor: "#2ecc71", color: "#fff", padding: "18px", border: "none", borderRadius: "18px", fontSize: "18px", fontWeight: "800", cursor: "pointer" }}>🟢 Makkelijk</button>
             <button onClick={() => startQuiz(2)} style={{ backgroundColor: "#f1c40f", color: "#fff", padding: "18px", border: "none", borderRadius: "18px", fontSize: "18px", fontWeight: "800", cursor: "pointer" }}>🟡 Gemiddeld</button>
             <button onClick={() => startQuiz(3)} style={{ backgroundColor: "#e74c3c", color: "#fff", padding: "18px", border: "none", borderRadius: "18px", fontSize: "18px", fontWeight: "800", cursor: "pointer" }}>🔴 Moeilijk</button>
-            {buildScanQuiz(history).length >= 3
+            {bouwAlbum(history).length >= 3
               ? <button onClick={() => startQuiz("scans")} style={{ backgroundColor: "#16a085", color: "#fff", padding: "18px", border: "none", borderRadius: "18px", fontSize: "18px", fontWeight: "800", cursor: "pointer" }}>📸 Mijn Scans Quiz</button>
               : <div style={{ fontSize: 13, opacity: 0.7 }}>📸 Scan eerst minstens 3 verschillende planten of dieren voor de scans-quiz.</div>}
             <button onClick={() => startQuiz("gemengd")} style={{ backgroundColor: "#9b59b6", color: "#fff", padding: "18px", border: "none", borderRadius: "18px", fontSize: "18px", fontWeight: "800", cursor: "pointer" }}>🌈 Gemengd (alle niveaus)</button>
