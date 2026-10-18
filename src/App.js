@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v8";
+const APP_VERSIE = "ontwikkel · v10";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -482,27 +482,31 @@ function resultText(r) {
   if (!r) return "";
   const p = [`${r.name}.`];
   gevaarWaarschuwingen(r.name).forEach((g) => p.push(`Let op: ${g.titel}. ${g.tekst}`));
+  (Array.isArray(r.controles) ? r.controles : []).filter((c) => c && c.status === "let-op").forEach((c) => p.push(`Let op bij de dubbelcheck: ${c.tekst}`));
   if (r.type === "animal") {
     if (r.klasse) p.push(`Klasse: ${r.klasse}.`);
     if (r.leefgebied) p.push(`Leefgebied: ${r.leefgebied}.`);
     if (r.leeftijd) p.push(`Geschatte leeftijd: ${r.leeftijd}.`);
     if (r.weetje) p.push(`Leuk weetje: ${r.weetje}`);
     if (typeof r.gezond !== "undefined") {
-      p.push(r.gezond === false ? `Gezondheidscheck: let op. ${r.gezondheidsopmerking || "Er lijkt iets niet in orde te zijn."}` : `Gezondheidscheck: lijkt gezond. ${r.gezondheidsopmerking || ""}`);
+      const gz = normGezond(r.gezond);
+      p.push(gz === false ? `Gezondheidscheck: let op. ${r.gezondheidsopmerking || "Er lijkt iets niet in orde te zijn."}` : gz === true ? `Gezondheidscheck: lijkt gezond. ${r.gezondheidsopmerking || ""}` : `Gezondheidscheck: onzeker. ${r.gezondheidsopmerking || "De toestand van het dier kon op de foto niet goed beoordeeld worden."}`);
+      p.push("Dit is een inschatting van een AI, geen diagnose.");
     }
     if (r.verzorgingstip) p.push(`Verzorging en omgang: ${r.verzorgingstip}`);
   } else {
     if (r.light) p.push(`Zonlicht: ${r.light}.`);
     if (r.soil) p.push(`Bodem: ${r.soil}.`);
-    const h = r.health;
-    if (h && h.isHealthy === false) {
-      p.push("Gezondheidscheck: let op.");
-      if (h.diseaseName) p.push(`Probleem: ${h.diseaseName}.`);
-      if (h.note) p.push(`Oorzaak: ${h.note}`);
-      if (h.solution) p.push(`Oplossing: ${h.solution}`);
-    } else {
-      p.push("Gezondheidscheck: deze plant lijkt gezond. Geen ziektes of problemen gevonden op de foto.");
-    }
+    const st = gezondheidToestand(r.health), h = r.health && typeof r.health === "object" ? r.health : {};
+    if (st === "let-op") p.push("Gezondheidscheck: let op.");
+    else if (st === "seizoen") p.push("Gezondheidscheck: de bladeren hebben een andere kleur, wat waarschijnlijk bij het seizoen hoort.");
+    else if (st === "gezond") p.push("Gezondheidscheck: op de foto zie ik geen duidelijke tekenen van ziekte.");
+    else p.push("Gezondheidscheck: onzeker. De gezondheid kon op de foto niet goed beoordeeld worden.");
+    if (h.observed) p.push(`De AI ziet: ${h.observed}`);
+    if (h.diseaseName) p.push(`Mogelijk probleem: ${h.diseaseName}.`);
+    if (h.note) p.push(`Toelichting: ${h.note}`);
+    if (h.solution) p.push(`Wat je kunt doen: ${h.solution}`);
+    p.push("Dit is een inschatting van een AI, geen diagnose.");
     p.push(giftTekst(r.giftigheid, !!r.__kids));
     p.push(isPaddenstoel(r.name) ? PADDENSTOEL_WAARSCHUWING : EET_WAARSCHUWING);
     if (r.freq) p.push(`Water: ${r.freq}.`);
@@ -583,6 +587,232 @@ function GiftigKaart({ g, kids, cardStyle }) {
   );
 }
 
+/* ============ AUTOMATISCHE DUBBELCHECK PER SCAN ============ */
+// Deze controles lopen bij elke scan, lokaal en zonder extra AI-aanroep. Ze zijn een vangnet voor fouten van de AI, geen garantie.
+const GIFT_RANG = { onbekend: -1, niet: 0, licht: 1, matig: 2, sterk: 3 };
+const BEKENDE_GIFTIG = [
+  { naam: "lelie of daglelie", re: /\blelie\b|\blelies\b|lilium|daglelie|hemerocallis/i, niet: /water.?lelie|nymphaea/i, mens: "licht", dier: "sterk", delen: "alle delen, ook het stuifmeel en het water uit de vaas", symptomen: "bij katten nierfalen: braken, loomheid, minder plassen", omgang: "Zet geen lelies in huis als je katten hebt. Bij contact meteen naar de dierenarts." },
+  { naam: "lelietje-van-dalen", re: /lelietje.van.dalen|convallaria/i, mens: "sterk", dier: "sterk", delen: "alle delen, ook de rode bessen en het water uit de vaas", symptomen: "misselijkheid, braken, hartritmeklachten", omgang: "Niet eten en niet in de mond steken. Was je handen na aanraking." },
+  { naam: "taxus", re: /taxus|venijnboom/i, mens: "sterk", dier: "sterk", delen: "naalden en zaden", symptomen: "duizeligheid, braken, hartklachten", omgang: "Niet eten. Houd kinderen en huisdieren uit de buurt." },
+  { naam: "gouden regen", re: /gouden regen|laburnum/i, mens: "sterk", dier: "sterk", delen: "alle delen, vooral de zaden in de peulen", symptomen: "braken, buikpijn, kramp", omgang: "Niet eten. Houd kinderen en huisdieren uit de buurt." },
+  { naam: "wolfskers", re: /wolfskers|belladonna|atropa/i, mens: "sterk", dier: "sterk", delen: "alle delen, vooral de zwarte bessen", symptomen: "wijde pupillen, hartkloppingen, verwardheid", omgang: "Niet aanraken om te eten. Bel bij inname meteen het Antigifcentrum." },
+  { naam: "vingerhoedskruid", re: /vingerhoedskruid|digitalis/i, mens: "sterk", dier: "sterk", delen: "alle delen", symptomen: "misselijkheid, trage of onregelmatige hartslag", omgang: "Niet eten en was je handen na aanraking." },
+  { naam: "monnikskap", re: /monnikskap|aconitum/i, mens: "sterk", dier: "sterk", delen: "alle delen, vooral de wortel", symptomen: "tintelingen, braken, hartritmeklachten", omgang: "Niet aanraken zonder handschoenen en nooit eten." },
+  { naam: "oleander", re: /oleander|nerium/i, mens: "sterk", dier: "sterk", delen: "alle delen", symptomen: "braken, hartritmeklachten", omgang: "Niet eten en draag handschoenen bij snoeien." },
+  { naam: "wonderboom", re: /wonderboom|ricinus/i, mens: "sterk", dier: "sterk", delen: "vooral de zaden", symptomen: "buikpijn, braken, ernstige uitdroging", omgang: "Niet eten. Bel bij inname meteen het Antigifcentrum." },
+  { naam: "rododendron of azalea", re: /rododendron|rhododendron|azalea/i, mens: "matig", dier: "sterk", delen: "bladeren en bloemen", symptomen: "kwijlen, braken, zwakte", omgang: "Niet eten. Houd huisdieren uit de buurt." },
+  { naam: "dieffenbachia", re: /dieffenbachia/i, mens: "matig", dier: "matig", delen: "alle delen, vooral het sap", symptomen: "prikkeling en zwelling van mond en keel", omgang: "Draag handschoenen en was je handen na aanraking." },
+  { naam: "wolfsmelk", re: /wolfsmelk|euphorbia/i, mens: "matig", dier: "matig", delen: "het witte melksap", symptomen: "huid- en oogirritatie, buikklachten", omgang: "Raak het sap niet aan. Spoel bij contact met water." },
+  { naam: "narcis", re: /narcis|narcissus/i, mens: "matig", dier: "matig", delen: "vooral de bollen", symptomen: "braken, buikpijn, diarree", omgang: "Niet eten. Bewaar bollen buiten bereik van kinderen en huisdieren." },
+  { naam: "klimop", re: /\bklimop\b|hedera/i, mens: "matig", dier: "matig", delen: "bladeren en bessen", symptomen: "braken, diarree, huidirritatie", omgang: "Niet eten en was je handen na aanraking." },
+  { naam: "sagopalm", re: /sagopalm|cycas/i, mens: "matig", dier: "sterk", delen: "vooral de zaden", symptomen: "braken, leverschade (bij honden zeer ernstig)", omgang: "Niet eten. Houd huisdieren uit de buurt." },
+];
+function giftControle(naam, g) {
+  const n = String(naam || "");
+  const basis = normGift(g);
+  const lijst = BEKENDE_GIFTIG.filter((b) => b.re.test(n) && !(b.niet && b.niet.test(n)));
+  if (lijst.length === 0) return { giftigheid: basis, aangepast: false, naam: "" };
+  const uit = { ...(basis || { mens: "onbekend", dier: "onbekend", delen: "", symptomen: "", omgang: "" }) };
+  let aangepast = false;
+  for (const b of lijst) for (const k of ["mens", "dier"]) {
+    if ((GIFT_RANG[b[k]] ?? -1) > (GIFT_RANG[uit[k]] ?? -1)) { uit[k] = b[k]; aangepast = true; }
+  }
+  if (aangepast) {
+    uit.delen = uit.delen || lijst[0].delen;
+    uit.symptomen = uit.symptomen || lijst[0].symptomen;
+    uit.omgang = uit.omgang || lijst[0].omgang;
+  }
+  return { giftigheid: uit, aangepast, naam: lijst[0].naam, vorigeMens: basis ? basis.mens : "onbekend", vorigeDier: basis ? basis.dier : "onbekend" };
+}
+
+const NEGATIE = new Set(["geen", "zonder", "niet", "nauwelijks", "niets"]);
+const PROBLEEM_PLANT = /^(schimmel\w*|meeldauw\w*|rot|rotte|luizen|bladluizen|gaatjes|gaten|verwelk\w*|beschadig\w*|ziek\w*|vraat\w*|dor|dode|afgestorven|kapot|aangevreten|aantasting\w*|plekken|vlekken|vlekkerig\w*|gevlekt\w*|vlek)$/;
+const PROBLEEM_KLEUR = /^(gele|geel|bruine|bruin|verkleurd\w*|verkleuring\w*|bleke|bleek|zwarte|zwart|grijze|grijzige)$/;
+const BLAD_WOORD = /^(blad|bladeren|blaadjes|naalden|stengel|stengels|takken)$/;
+const PROBLEEM_DIER = /^(gewond\w*|wond\w*|bloed\w*|bloedt|kreupel\w*|hink\w*|ziek\w*|verzwakt\w*|mager\w*|uitgeput\w*|dood|dode|parasiet\w*|schurft\w*|vervuild\w*)$/;
+function problemenInTekst(tekst, soort) {
+  const w = String(tekst || "").toLowerCase().match(/[a-zà-ÿ]+/g) || [];
+  const genegeerd = (i) => { for (let k = Math.max(0, i - 3); k < i; k++) if (NEGATIE.has(w[k])) return true; return false; };
+  const re = soort === "dier" ? PROBLEEM_DIER : PROBLEEM_PLANT;
+  const gevonden = [];
+  w.forEach((x, i) => {
+    if (genegeerd(i)) return;
+    if (re.test(x)) gevonden.push(x);
+    else if (soort !== "dier" && PROBLEEM_KLEUR.test(x) && w.slice(Math.max(0, i - 2), i + 4).some((y) => BLAD_WOORD.test(y))) gevonden.push(`${x} (bij de bladeren)`);
+  });
+  return [...new Set(gevonden)].slice(0, 4);
+}
+
+function latijnUit(naam) {
+  const s = String(naam || "").trim();
+  const m = s.match(/\(([A-Z][a-z-]+ [a-z-]+)/);
+  if (m) return m[1];
+  if (/^[A-Z][a-z-]+ [a-z-]+(?: [A-Za-z.×x-]+)*$/.test(s)) return s.split(/\s+/).slice(0, 2).join(" ");
+  return "";
+}
+function vergelijkBronnen(bronnen) {
+  const l = (bronnen || []).filter((b) => b && b.latijn);
+  if (l.length === 0) return { oordeel: "geen", bronnen: l };
+  if (l.length === 1) return { oordeel: "enkel", bronnen: l };
+  const soorten = new Set(l.map((b) => b.latijn.toLowerCase()));
+  const geslachten = new Set(l.map((b) => b.latijn.toLowerCase().split(" ")[0]));
+  return { oordeel: soorten.size === 1 ? "eens" : geslachten.size === 1 ? "geslacht" : "verschillend", bronnen: l };
+}
+
+function bouwPlantControles({ naam, bronnen, health, giftigheid, verzorgingVanAI }) {
+  const c = [];
+  const v = vergelijkBronnen(bronnen);
+  const lijstTekst = v.bronnen.map((b) => `${b.bron}: ${b.latijn}`).join("; ");
+  if (v.oordeel === "eens") c.push({ id: "bronnen", status: "ok", tekst: `Meerdere bronnen zijn het eens over de soort (${lijstTekst}).` });
+  else if (v.oordeel === "geslacht") c.push({ id: "bronnen", status: "let-op", tekst: `De bronnen noemen hetzelfde geslacht maar een andere soort (${lijstTekst}). Neem een extra foto van een blad of bloem om zeker te zijn.` });
+  else if (v.oordeel === "verschillend") c.push({ id: "bronnen", status: "let-op", tekst: `De bronnen verschillen (${lijstTekst}). Neem een tweede foto van een blad of bloem en vergelijk.` });
+  else if (v.oordeel === "enkel") c.push({ id: "bronnen", status: "info", tekst: `Slechts één bron kon de soort bepalen (${lijstTekst}). Met een PlantNet- of Plant.id-sleutel erbij kan de app dit kruiscontroleren.` });
+  else c.push({ id: "bronnen", status: "info", tekst: "De soort kon niet met een wetenschappelijke naam vergeleken worden." });
+
+  const h = health && typeof health === "object" ? { ...health } : null;
+  const st = gezondheidToestand(h);
+  const obs = h && h.observed ? h.observed : "";
+  const pr = obs ? problemenInTekst(obs, "plant") : [];
+  if (st === "gezond" && pr.length) {
+    h.isHealthy = null;
+    c.push({ id: "gezondheid", status: "let-op", tekst: `De AI zegt "gezond", maar beschrijft zelf: ${pr.join(", ")}. Daarom behandelen we dit als onzeker.` });
+  } else if (st === "gezond" && obs) c.push({ id: "gezondheid", status: "ok", tekst: "De beschrijving van de AI past bij de conclusie 'gezond'." });
+  else if (st === "gezond") c.push({ id: "gezondheid", status: "info", tekst: "De AI beschreef niet wat hij zag, dus 'gezond' is moeilijker te controleren." });
+  else if (st === "onzeker") c.push({ id: "gezondheid", status: "info", tekst: "De gezondheid kon op deze foto niet beoordeeld worden." });
+  else if (pr.length) c.push({ id: "gezondheid", status: "ok", tekst: "De beschrijving van de AI past bij de conclusie." });
+
+  const gc = giftControle(naam, giftigheid);
+  if (gc.naam && gc.aangepast) c.push({ id: "giftigheid", status: "let-op", tekst: `De AI zei: mens "${gc.vorigeMens}", huisdier "${gc.vorigeDier}". Maar ${gc.naam} staat op onze lijst van bekende giftige planten, dus de waarschuwing is aangepast.` });
+  else if (gc.naam) c.push({ id: "giftigheid", status: "ok", tekst: `Gecontroleerd tegen onze lijst van bekende giftige planten (${gc.naam}): de AI zat niet te laag.` });
+  else c.push({ id: "giftigheid", status: "info", tekst: "Deze plant staat niet op onze korte lijst van bekende giftige planten; de giftigheid komt alleen van de AI. Bij twijfel: Antigifcentrum 070 245 245." });
+
+  if (!verzorgingVanAI) c.push({ id: "verzorging", status: "info", tekst: "Het verzorgingsadvies is een algemene standaard en geen advies voor deze soort." });
+  return { controles: c, health: h, giftigheid: gc.giftigheid };
+}
+
+function bouwDierControles(res) {
+  const r = { ...res };
+  const c = [];
+  const heeft = "gezond" in r;
+  const gz = heeft ? normGezond(r.gezond) : undefined;
+  const pr = problemenInTekst(r.gezondheidsopmerking, "dier");
+  if (gz === true && pr.length) {
+    r.gezond = null;
+    c.push({ id: "gezondheid", status: "let-op", tekst: `De AI zegt "gezond", maar beschrijft zelf: ${pr.join(", ")}. Daarom behandelen we dit als onzeker.` });
+  } else if (gz === true || gz === false) c.push({ id: "gezondheid", status: "ok", tekst: "Er is een gezondheidsinschatting; de beschrijving spreekt die niet tegen." });
+  else if (heeft) c.push({ id: "gezondheid", status: "info", tekst: "De toestand van het dier kon niet beoordeeld worden." });
+  const klasse = klasseCanon(r.klasse);
+  c.push(klasse ? { id: "groep", status: "ok", tekst: `De dierengroep (${klasse}) is een bekende groep.` } : { id: "groep", status: "info", tekst: "De dierengroep kon niet gecontroleerd worden." });
+  return { res: r, controles: c };
+}
+
+function cleanControles(c) {
+  if (!Array.isArray(c)) return [];
+  return c.filter((x) => x && typeof x === "object").slice(0, 8)
+    .map((x) => ({ id: asText(x.id).slice(0, 20), status: ["ok", "let-op", "info"].includes(x.status) ? x.status : "info", tekst: asText(x.tekst).slice(0, 400) }))
+    .filter((x) => x.tekst);
+}
+
+function DubbelcheckKaart({ controles, cardStyle }) {
+  const lijst = Array.isArray(controles) ? controles : [];
+  if (lijst.length === 0) return null;
+  const ok = lijst.filter((c) => c.status === "ok").length;
+  const letop = lijst.filter((c) => c.status === "let-op").length;
+  const icoon = { ok: "✅", "let-op": "⚠️", info: "ℹ️" };
+  return (
+    <div style={{ ...cardStyle, borderLeft: `6px solid ${letop ? "#e67e22" : "#2ecc71"}` }}>
+      <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>🧪 Automatische dubbelcheck: {ok} van {lijst.length} in orde</div>
+      <div style={{ fontSize: 14, lineHeight: "1.6" }}>
+        {lijst.map((c, i) => <div key={i} style={{ marginTop: i ? 6 : 0 }}>{icoon[c.status]} {c.tekst}</div>)}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>Dit zijn automatische controles op wat de AI zegt. Ze verkleinen de kans op fouten, maar geven geen garantie.</div>
+    </div>
+  );
+}
+
+/* ============ DIAGNOSE-LOGBOEK (geen foto's, geen sleutels) ============ */
+const DIAG_KEY = "natuurscanner_diagnose";
+function loadDiag() {
+  try { const l = JSON.parse(localStorage.getItem(DIAG_KEY)); return Array.isArray(l) ? l.filter((x) => x && typeof x === "object") : []; } catch (e) { return []; }
+}
+function logDiag(rec) {
+  try {
+    const l = loadDiag();
+    l.unshift({ t: new Date().toISOString(), v: APP_VERSIE, ...rec });
+    localStorage.setItem(DIAG_KEY, JSON.stringify(l.slice(0, 200)));
+  } catch (e) { /* logboek is bijzaak: nooit de app laten haperen */ }
+}
+function diagVoorScan(e) {
+  const c = Array.isArray(e && e.controles) ? e.controles : [];
+  return {
+    type: e.type, bron: String(e.source || ""), naam: String(e.name || "").slice(0, 80),
+    ok: c.filter((x) => x.status === "ok").length, info: c.filter((x) => x.status === "info").length, letop: c.filter((x) => x.status === "let-op").map((x) => x.id),
+    gezond: e.type === "plant" ? (e.health ? e.health.isHealthy : null) : (e.gezond === undefined ? null : e.gezond),
+  };
+}
+function makeDiagExport() {
+  let ua = ""; try { ua = navigator.userAgent; } catch (e) { /* niets */ }
+  return JSON.stringify({ app: "NatuurScanner", soort: "diagnose-export", versie: APP_VERSIE, datum: new Date().toISOString(), browser: ua, statistieken: loadStats(), logboek: loadDiag() }, null, 1);
+}
+
+/* ============ GEZONDHEID: gezond / let op / seizoen / onzeker ============ */
+// Een ontbrekend of onduidelijk antwoord wordt NOOIT als "gezond" getoond: dan is de toestand "onzeker".
+function normGezond(v) {
+  if (v === true || v === false) return v;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (["true", "ja", "yes", "gezond", "lijkt gezond"].includes(s)) return true;
+    if (["false", "nee", "no", "niet gezond", "ongezond", "let op"].includes(s)) return false;
+  }
+  return null;
+}
+function gezondheidToestand(h) {
+  const gz = h && typeof h === "object" ? normGezond(h.isHealthy) : null;
+  if (gz === false && h.seasonal === true && !h.diseaseName) return "seizoen";
+  return gz === false ? "let-op" : gz === true ? "gezond" : "onzeker";
+}
+const GEZOND_UITLEG = "Dit is een inschatting van een AI op één foto, geen diagnose en geen meting in real time. Twijfel je? Vraag het aan een kenner of een volwassene.";
+function herfstNotitie(d) {
+  return huidigSeizoen(d) === "herfst" ? "🍂 Het is herfst: veel bomen, struiken en buitenplanten kleuren en verliezen nu hun bladeren. Dat is normaal. Gele of bruine bladeren bij een kamerplant of midden in de zomer wijzen vaker op een probleem." : "";
+}
+function huidigeDatumTekst() {
+  try { return new Date().toLocaleDateString("nl-BE", { day: "numeric", month: "long", year: "numeric" }); } catch (e) { return ""; }
+}
+const GEZOND_KLEUR = { "let-op": "#e74c3c", gezond: "#2ecc71", seizoen: "#e67e22", onzeker: "#95a5a6" };
+const GEZOND_TITEL = { "let-op": "🩺 Gezondheidscheck: Let op", gezond: "✅ Gezondheidscheck: lijkt gezond", seizoen: "🍂 Gezondheidscheck: verkleuring, waarschijnlijk seizoen", onzeker: "❓ Gezondheidscheck: onzeker" };
+function PlantGezondheidKaart({ health, cardStyle }) {
+  const st = gezondheidToestand(health);
+  const h = health && typeof health === "object" ? health : {};
+  const herfst = herfstNotitie();
+  return (
+    <div style={{ ...cardStyle, borderLeft: `6px solid ${GEZOND_KLEUR[st]}` }}>
+      <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>{GEZOND_TITEL[st]}</div>
+      <div style={{ fontSize: 15, lineHeight: "1.6" }}>
+        {h.observed && <div><strong>👀 Wat de AI ziet:</strong> {h.observed}</div>}
+        {h.diseaseName && <div style={{ marginTop: 6 }}><strong>🦠 Mogelijk probleem:</strong> {h.diseaseName}</div>}
+        {h.note && <div style={{ marginTop: 6 }}><strong>ℹ️ Toelichting:</strong> {h.note}</div>}
+        {h.solution && <div style={{ marginTop: 6 }}><strong>🛠️ Wat kun je doen:</strong> {h.solution}</div>}
+        {st === "gezond" && !h.observed && <div>Op deze foto zie ik geen duidelijke tekenen van ziekte of schade.</div>}
+        {st === "onzeker" && <div>De gezondheid kon op deze foto niet betrouwbaar beoordeeld worden. Probeer eventueel een scherpere foto van één blad of één plant.</div>}
+        {herfst && <div style={{ marginTop: 8 }}>{herfst}</div>}
+        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>{GEZOND_UITLEG}</div>
+      </div>
+    </div>
+  );
+}
+function DierGezondheidKaart({ gezond, opmerking, cardStyle }) {
+  const gz = normGezond(gezond);
+  const st = gz === false ? "let-op" : gz === true ? "gezond" : "onzeker";
+  const standaard = st === "let-op" ? "Er lijkt iets niet in orde te zijn." : st === "gezond" ? "Geen duidelijke verwondingen of ziektetekens op de foto." : "De toestand van het dier kon op deze foto niet goed beoordeeld worden.";
+  return (
+    <div style={{ ...cardStyle, borderLeft: `6px solid ${GEZOND_KLEUR[st]}` }}>
+      <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>{GEZOND_TITEL[st]}</div>
+      <div style={{ fontSize: 15 }}>{opmerking || standaard}</div>
+      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>{GEZOND_UITLEG}</div>
+    </div>
+  );
+}
+
 /* ============ VEILIGE GEGEVENS + FOUTSCHERM ============ */
 // Alles wat als tekst getoond wordt, wordt tot tekst gemaakt: een object of lijst van de AI (of uit een back-up)
 // mag het scherm nooit laten crashen.
@@ -601,9 +831,11 @@ function cleanEntry(e) {
   for (const k of TEKST_VELDEN) if (k in o && typeof o[k] !== "string") o[k] = asText(o[k]);
   if ("health" in o) {
     const h = o.health;
-    o.health = h && typeof h === "object" ? { ...h, diseaseName: asText(h.diseaseName), note: asText(h.note), solution: asText(h.solution) } : null;
+    o.health = h && typeof h === "object" ? { ...h, isHealthy: normGezond(h.isHealthy), diseaseName: asText(h.diseaseName), note: asText(h.note), solution: asText(h.solution), observed: asText(h.observed) } : null;
   }
   if ("giftigheid" in o) o.giftigheid = normGift(o.giftigheid);
+  if ("gezond" in o) o.gezond = normGezond(o.gezond);
+  if ("controles" in o) o.controles = cleanControles(o.controles);
   return o;
 }
 class ErrorBoundary extends React.Component {
@@ -628,6 +860,7 @@ class ErrorBoundary extends React.Component {
 
 /* ============ GEVAARLIJKE EN INVASIEVE SOORTEN IN BELGIË (op naam herkend) ============ */
 const GEVAAR_SOORTEN = [
+  { ernst: "info", icoon: "🐴", re: /gewone esdoorn|acer pseudoplatanus|vederesdoorn|acer negundo/i, titel: "Esdoorn: gevaarlijk voor paarden", tekst: "De zaden (de vliegende 'neusjes'), de jonge zaailingen en soms ook de bladeren van de gewone esdoorn kunnen paarden ernstig ziek maken (atypische myopathie, ook weidemyopathie genoemd). Heb je paarden of ezels? Houd ze in de herfst en de lente weg van esdoorns en hun zaadjes, en bel bij spierstijfheid of zwakte meteen de dierenarts." },
   { ernst: "gevaar", icoon: "🌿", re: /berenklauw|heracleum/i, titel: "Berenklauw: niet aanraken", tekst: "Het sap van reuzenberenklauw kan samen met zonlicht pijnlijke blaren en brandwonden geven, en ook gewone berenklauw kan de huid irriteren. Raak de plant niet aan en laat geen sap op je huid komen. Gebeurd het toch? Spoel de huid goed met water en zeep, houd de plek uit de zon en ga naar een dokter. Bij ernstige klachten bel je 112." },
   { ernst: "gevaar", icoon: "☠️", re: /scheerling|conium/i, titel: "Scheerling: zeer giftig", tekst: "Scheerling is zeer giftig en lijkt op wilde peen en kervel. Eet er nooit van, pluk hem niet en was je handen na aanraking. Heb je er toch van gegeten, of twijfel je? Bel meteen het Antigifcentrum 070 245 245, of 112 bij nood." },
   { ernst: "gevaar", icoon: "🐛", re: /processierups|thaumetopoea/i, titel: "Processierups: niet aanraken", tekst: "De fijne haartjes van processierupsen kunnen jeuk, uitslag, pijnlijke ogen en soms ademhalingsklachten geven. Blijf uit de buurt van de rupsen en hun nesten en raak ze niet aan. Last gehad? Spoel de huid met water, doe de kleren in de was en vraag een volwassene om hulp of bel de huisarts. Heb je moeite met ademen, bel dan 112." },
@@ -647,8 +880,8 @@ function GevaarKaart({ name, cardStyle }) {
   return (
     <>
       {lijst.map((g) => (
-        <div key={g.titel} style={{ ...cardStyle, borderLeft: `6px solid ${g.ernst === "gevaar" ? "#e74c3c" : "#3498db"}` }}>
-          <div style={{ fontWeight: 800, marginBottom: 6, color: g.ernst === "gevaar" ? "#ff6b6b" : "#74b9ff", fontSize: 17 }}>{g.icoon} {g.titel}</div>
+        <div key={g.titel} style={{ ...cardStyle, borderLeft: `6px solid ${{ gevaar: "#e74c3c", info: "#e67e22" }[g.ernst] || "#3498db"}` }}>
+          <div style={{ fontWeight: 800, marginBottom: 6, color: { gevaar: "#ff6b6b", info: "#ffb86b" }[g.ernst] || "#74b9ff", fontSize: 17 }}>{g.icoon} {g.titel}</div>
           <div style={{ fontSize: 14, lineHeight: "1.6" }}>{g.tekst}</div>
         </div>
       ))}
@@ -1043,6 +1276,8 @@ function AppInner() {
   const [error, setError] = useState("");
   const [toonSleutels, setToonSleutels] = useState(false);
   const [backupBericht, setBackupBericht] = useState("");
+  const [diagBericht, setDiagBericht] = useState("");
+  const [diagTeller, setDiagTeller] = useState(0);
   const [opslagVol, setOpslagVol] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [result, setResult] = useState(null);
@@ -1320,6 +1555,23 @@ function AppInner() {
     if (bewaard.length < verwacht) setOpslagVol(true);
   };
 
+  const exporteerDiagnose = () => {
+    try {
+      const blob = new Blob([makeDiagExport()], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `natuurscanner-diagnose-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setDiagBericht(`✅ Diagnose-export gemaakt (${loadDiag().length} scans in het logboek).`);
+    } catch (err) {
+      setDiagBericht("⚠️ Diagnose-export mislukt: " + (err && err.message ? err.message : ""));
+    }
+  };
+
   const exporteerBackup = () => {
     try {
       const blob = new Blob([makeBackup(history)], { type: "application/json" });
@@ -1379,6 +1631,7 @@ function AppInner() {
         }
         setTimeout(() => setSafariBericht(""), 5000);
       } catch (err) {
+        logDiag({ type: "safari", fout: String(err && err.message).slice(0, 200) });
         setError("Safari controle mislukt. " + (err && err.message ? err.message : ""));
       }
       setScanMode("general");
@@ -1390,11 +1643,14 @@ function AppInner() {
       try {
         if (!keys.gemini) throw new Error("Gemini API-sleutel ontbreekt.");
         const res = await callGemini(base64, keys.gemini, `Bioloog. Identificeer dit dier of insect, EN beoordeel meteen hoe het dier er op de foto bij lijkt te staan (zichtbare verwondingen, ziektetekens, uitputting, of gewoon gezond) EN geef een korte praktische verzorgings-/omgangstip (bv. wat te doen als je dit dier tegenkomt, hoe ermee om te gaan, of wanneer hulp van een volwassene/dierenarts nodig is). JSON: {"name":"Naam","scientificName":"Wetenschappelijk","klasse":"Klasse","familie":"Familie","leefgebied":"Habitat","leeftijd":"Schatting leeftijd","weetje":"Leuk weetje.","gezond":true/false,"gezondheidsopmerking":"Wat je ziet aan de gezondheid/toestand van het dier op de foto.","verzorgingstip":"Praktisch advies over verzorging/omgang met dit dier."}`);
-        const entry = cleanEntry({ id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "animal", score: null, source: "Gemini AI", ...res });
+        const dc = bouwDierControles(res);
+        const entry = cleanEntry({ id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "animal", score: null, source: "Gemini AI", ...dc.res, controles: dc.controles });
+        logDiag(diagVoorScan(entry));
         await bewaarScan(entry);
         setResult(entry);
         setScreen("result");
       } catch (err) {
+        logDiag({ type: "animal", fout: String(err && err.message).slice(0, 200) });
         setError("Dier niet herkend: " + err.message);
         setScreen("home");
       }
@@ -1405,10 +1661,12 @@ function AppInner() {
     try {
       const plantData = await identifyPlant(base64);
       const entry = { id: Date.now(), date: new Date().toLocaleDateString("nl-BE"), image: dataUrl, type: "plant", lastWatered: Date.now(), ...plantData };
+      logDiag(diagVoorScan(entry));
       await bewaarScan(entry);
       setResult(entry);
       setScreen("result");
     } catch (err) {
+      logDiag({ type: "plant", fout: String(err && err.message).slice(0, 200) });
       setError("Plant niet herkend: " + err.message);
       setScreen("home");
     }
@@ -1418,7 +1676,6 @@ function AppInner() {
   const berichtRef = useRef("");
   berichtRef.current = safariBericht;
   const huidigeMissie = safariOmgeving ? getMissieList(safariOmgeving, keys.customMissions)[safariOpdracht] || "" : "";
-  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!SPEECH_OK) return;
     let tries = 0; let last = -1;
@@ -1477,7 +1734,6 @@ function AppInner() {
   useEffect(() => {
     if (voorlezen && screen === "loading" && loadingMsg) speak(loadingMsg);
   }, [voorlezen, screen, loadingMsg]);
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   const startQuiz = (niveauKeuze) => {
     const gekozenNiveau = niveauKeuze || quizNiveau;
@@ -1660,7 +1916,7 @@ function AppInner() {
       ? callGemini(
           base64,
           gemini,
-          `Je bent een plantenexpert. Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck EN een giftigheidscheck. Antwoord in eenvoudig Nederlands. JSON: {"name":"Naam","gezond":true/false,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":"","giftig":{"mens":"niet|licht|matig|sterk|onbekend","dier":"niet|licht|matig|sterk|onbekend","delen":"welke delen giftig zijn","symptomen":"mogelijke klachten, kort","omgang":"hoe ga je ermee om, bv. handschoenen of handen wassen"}} Bij giftig: dier betekent katten en honden. Weet je het niet zeker, antwoord onbekend. Gok nooit.`,
+          `Je bent een plantenexpert. Vandaag is het ${huidigeDatumTekst()} in België (seizoen: ${SEIZOEN_NAAM[huidigSeizoen()].toLowerCase()}). Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck EN een giftigheidscheck. Antwoord in eenvoudig Nederlands. Gezondheidscheck: beschrijf eerst kort wat je op de foto ziet aan de bladeren (kleur, vlekken, gaatjes, verwelking, schimmel) in "waargenomen". Zet "gezond" alleen op true als je duidelijk geen verkleuring, vlekken of schade ziet. Zie je gele, bruine of gevlekte bladeren, zet "gezond" dan op false en leg bij "oorzaak" uit of dit door het seizoen normaal kan zijn (bijvoorbeeld herfstkleuren bij een loofboom) of op een probleem wijst; zet "seizoen_normaal" op true als de verkleuring waarschijnlijk seizoensgebonden en normaal is. Is de foto te onduidelijk of weet je het niet zeker, zet "gezond" dan op null. Gok nooit. JSON: {"name":"Nederlandse naam (Latijnse naam)","gezond":true/false/null,"waargenomen":"","seizoen_normaal":true/false/null,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":"","giftig":{"mens":"niet|licht|matig|sterk|onbekend","dier":"niet|licht|matig|sterk|onbekend","delen":"welke delen giftig zijn","symptomen":"mogelijke klachten, kort","omgang":"hoe ga je ermee om, bv. handschoenen of handen wassen"}} Bij giftig: dier betekent katten en honden. Weet je het niet zeker, antwoord onbekend. Gok nooit.`,
           35000
         ).catch((e) => {
           errors.push(`Gemini: ${e.message}`);
@@ -1674,7 +1930,7 @@ function AppInner() {
     let score = 0;
     let source = "";
     let careData = getWaterInfoFallback();
-    let healthData = { isHealthy: true, diseaseName: "", note: "", solution: "" };
+    let healthData = { isHealthy: null, diseaseName: "", note: "", solution: "", observed: "", seasonal: null };
 
     const sug = idData?.result?.classification?.suggestions?.[0];
     if (sug) {
@@ -1683,13 +1939,13 @@ function AppInner() {
       source = "Plant.id";
       const diseaseInfo = idData.result?.disease;
       if (diseaseInfo) {
-        const isHealthy = !!diseaseInfo.is_healthy?.binary;
+        const isHealthy = normGezond(diseaseInfo.is_healthy?.binary);
         const topDisease = diseaseInfo.disease?.suggestions?.[0];
         healthData = {
           isHealthy,
-          diseaseName: isHealthy ? "" : topDisease?.name || "",
-          note: isHealthy ? "" : topDisease?.details?.description || "",
-          solution: isHealthy ? "" : topDisease?.details?.treatment?.biological?.[0] || "",
+          diseaseName: isHealthy === false ? topDisease?.name || "" : "",
+          note: isHealthy === false ? topDisease?.details?.description || "" : "",
+          solution: isHealthy === false ? topDisease?.details?.treatment?.biological?.[0] || "" : "",
         };
       }
     }
@@ -1718,15 +1974,16 @@ function AppInner() {
         amount: gRes.amount || careData.amount,
         tip: gRes.tip || careData.tip,
       };
-      // Gezondheidsdata van Gemini enkel gebruiken als Plant.id nog geen ziektedata gaf
+      // Gezondheid: Plant.id is de gespecialiseerde bron als die een antwoord gaf; Gemini vult aan. Zegt één van beide
+      // dat er iets mis is, dan tonen we "let op". Een ontbrekend antwoord is "onzeker", nooit "gezond".
+      const gGez = normGezond(gRes.gezond);
       if (!idData?.result?.disease) {
-        healthData = {
-          isHealthy: gRes.gezond,
-          diseaseName: gRes.ziekte || "",
-          note: gRes.oorzaak || "",
-          solution: gRes.oplossing || "",
-        };
+        healthData = { isHealthy: gGez, diseaseName: asText(gRes.ziekte), note: asText(gRes.oorzaak), solution: asText(gRes.oplossing), observed: "", seasonal: null };
+      } else if (healthData.isHealthy !== false && gGez === false) {
+        healthData = { isHealthy: false, diseaseName: asText(gRes.ziekte), note: asText(gRes.oorzaak), solution: asText(gRes.oplossing), observed: "", seasonal: null };
       }
+      healthData.observed = asText(gRes.waargenomen);
+      healthData.seasonal = normGezond(gRes.seizoen_normaal);
     }
 
     if (!plantName) {
@@ -1734,7 +1991,17 @@ function AppInner() {
       throw new Error("Geen plant gevonden." + detail);
     }
 
-    return cleanEntry({ name: plantName, score, source, ...careData, health: healthData, giftigheid: normGift(gRes && gRes.giftig) });
+    const bronnen = [
+      { bron: "Plant.id", latijn: latijnUit(sug && sug.name) },
+      { bron: "PlantNet", latijn: latijnUit(netData?.results?.[0]?.species?.scientificNameWithoutAuthor) },
+      { bron: "Gemini", latijn: latijnUit(gRes && gRes.name) },
+    ];
+    const check = bouwPlantControles({
+      naam: [plantName, gRes && gRes.name, ...bronnen.map((b) => b.latijn)].filter(Boolean).join(" | "),
+      bronnen, health: healthData, giftigheid: normGift(gRes && gRes.giftig),
+      verzorgingVanAI: !!(gRes && (gRes.light || gRes.soil || gRes.freq || gRes.amount)),
+    });
+    return cleanEntry({ name: plantName, score, source, ...careData, health: check.health, giftigheid: check.giftigheid, controles: check.controles });
   }
 
   const t = kidsMode ? ks : s;
@@ -1895,14 +2162,8 @@ function AppInner() {
                   <div style={{ fontSize: 15 }}>{result.weetje}</div>
                 </div>
               )}
-              {typeof result.gezond !== "undefined" && (
-                <div style={{ ...t.card, borderLeft: result.gezond === false ? "6px solid #e74c3c" : "6px solid #2ecc71" }}>
-                  <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>
-                    {result.gezond === false ? "🩺 Gezondheidscheck: Let op" : "✅ Gezondheidscheck: Lijkt gezond"}
-                  </div>
-                  <div style={{ fontSize: 15 }}>{result.gezondheidsopmerking || (result.gezond === false ? "Er lijkt iets niet in orde te zijn." : "Geen zichtbare verwondingen of ziektetekens op de foto.")}</div>
-                </div>
-              )}
+              {typeof result.gezond !== "undefined" && <DierGezondheidKaart gezond={result.gezond} opmerking={result.gezondheidsopmerking} cardStyle={t.card} />}
+              <DubbelcheckKaart controles={result.controles} cardStyle={t.card} />
               {result.verzorgingstip && (
                 <div style={t.card}>
                   <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>🧑‍⚕️ Verzorging & Omgang</div>
@@ -1917,20 +2178,8 @@ function AppInner() {
                 <div style={{ fontSize: 15, lineHeight: "1.6" }}><strong>☀️ Zonlicht:</strong> {result.light}<br /><strong>🌱 Bodem:</strong> {result.soil}</div>
               </div>
 
-              <div style={{ ...t.card, borderLeft: (result.health && result.health.isHealthy === false) ? "6px solid #e74c3c" : "6px solid #2ecc71" }}>
-                <div style={{ fontWeight: 800, marginBottom: 10, color: "#a8e6cf", fontSize: 18 }}>
-                  {(result.health && result.health.isHealthy === false) ? "🩺 Gezondheidscheck: Let op" : "✅ Gezondheidscheck: Gezond"}
-                </div>
-                {(result.health && result.health.isHealthy === false) ? (
-                  <div style={{ fontSize: 15, lineHeight: "1.6" }}>
-                    {result.health.diseaseName && <div><strong>🦠 Probleem:</strong> {result.health.diseaseName}</div>}
-                    {result.health.note && <div style={{ marginTop: 6 }}><strong>ℹ️ Oorzaak:</strong> {result.health.note}</div>}
-                    {result.health.solution && <div style={{ marginTop: 6 }}><strong>🛠️ Oplossing:</strong> {result.health.solution}</div>}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 15 }}>Deze plant lijkt gezond! Geen ziektes of problemen gevonden op de foto.</div>
-                )}
-              </div>
+              <PlantGezondheidKaart health={result.health} cardStyle={t.card} />
+              <DubbelcheckKaart controles={result.controles} cardStyle={t.card} />
 
               <GiftigKaart g={result.giftigheid} kids={kidsMode} cardStyle={t.card} />
               <EetWaarschuwing name={result.name} cardStyle={t.card} />
@@ -2079,6 +2328,17 @@ function AppInner() {
 
             <label style={s.label}>Gemini API</label>
             <input style={s.input} type={toonSleutels ? "text" : "password"} autoComplete="new-password" value={keys.gemini} onChange={(e) => setKeys({ ...keys, gemini: e.target.value })} />
+          </div>
+
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, marginBottom: 12, color: "#a8e6cf", fontSize: 18 }}>🩺 Diagnose</div>
+            <div style={{ fontSize: 14, lineHeight: "1.6", marginBottom: 12 }}>Bij elke scan houdt de app een klein logboek bij: soort, bron, uitkomst van de automatische dubbelcheck en eventuele fouten. Er worden geen foto's of sleutels in bewaard. Exporteer het bestand om fouten op te sporen.</div>
+            <div style={{ fontSize: 14, marginBottom: 12 }}>Logboek: {loadDiag().length} scans{diagTeller < 0 ? "" : ""}</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button style={s.ghostButton} onClick={exporteerDiagnose}>💾 Diagnose-export opslaan</button>
+              <button style={s.ghostButton} onClick={() => { try { localStorage.removeItem(DIAG_KEY); } catch (e) { /* niets */ } setDiagBericht("🗑️ Logboek gewist."); setDiagTeller((n) => n + 1); }}>🗑️ Logboek wissen</button>
+            </div>
+            {diagBericht && <div style={{ fontSize: 14, marginTop: 10 }}>{diagBericht}</div>}
           </div>
 
           <div style={s.card}>
