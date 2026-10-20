@@ -1,0 +1,46 @@
+name: Automatische controle
+
+on:
+  push:
+    branches: [ontwikkel, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Code ophalen
+        uses: actions/checkout@v4
+
+      - name: Node 20 installeren
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Testgereedschap installeren (tests/)
+        working-directory: tests
+        run: npm ci
+
+      - name: Volledige testsuite, aapjestest en statische analyse (React 19, StrictMode)
+        env:
+          STRICT: "1"
+        run: node tests/run.js src/App.js
+
+      - name: App zelf installeren voor de productiebuild
+        run: |
+          npm install --legacy-peer-deps
+          npm install ajv@8 --no-save --legacy-peer-deps
+
+      - name: Echte productiebuild
+        env:
+          CI: "false"
+          GENERATE_SOURCEMAP: "false"
+        run: npm run build
+
+      - name: Rooktest van de productiebuild
+        working-directory: tests
+        run: node smoke_build.js ../build ../src/App.js
