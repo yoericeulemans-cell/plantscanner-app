@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stemtest</title>
+<style>
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  --bg: #f5f7f4; --fg: #1d2a22; --muted: #5b6b61; --card: #ffffff; --line: #cfd8d2; --accent: #1f7a4d; --accent-fg: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #14201a; --fg: #e8f0ea; --muted: #9db0a4; --card: #1c2c24; --line: #2f4439; --accent: #3fbf80; --accent-fg: #0c1a12; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #14201a; --fg: #e8f0ea; --muted: #9db0a4; --card: #1c2c24; --line: #2f4439; --accent: #3fbf80; --accent-fg: #0c1a12; color-scheme: dark; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+h1 { font-size: 24px; margin: 0 0 6px; }
+p { margin: 0 0 12px; color: var(--muted); }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 0 0 16px; font-size: 14px; overflow-x: auto; }
+.box b { color: var(--fg); }
+button { display: block; width: 100%; margin: 0 0 10px; padding: 14px; font: inherit; font-weight: 600; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-fg); }
+button.zacht { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
+textarea { width: 100%; height: 220px; box-sizing: border-box; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 10px; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stemtest</h1>
+  <p>Zet het mediavolume van je gsm hoog. Tik de tests één voor één aan en wacht na elke test ongeveer 6 seconden. Stuur me daarna een screenshot van heel de pagina, ook het vak onderaan.</p>
+  <div class="box" id="info">Bezig met laden…</div>
+  <button data-test="1">Test 1: Engels (spreekt de gsm überhaupt?)</button>
+  <button data-test="2">Test 2: Nederlands, taal nl-BE</button>
+  <button data-test="3">Test 3: Nederlands, taal nl-NL</button>
+  <button data-test="4">Test 4: Nederlands, taal nl</button>
+  <button data-test="6">Test 6: precies zoals de app (nl-BE, tempo 0,9, toon 0,8)</button>
+  <button data-test="5" id="b5">Test 5: eerste Nederlandse stem uit de lijst</button>
+  <button class="zacht" id="kopie">Kopieer het resultaat</button>
+  <textarea id="log" readonly>Nog geen tests gedaan.</textarea>
+</main>
+<script>
+(function () {
+  var synth = window.speechSynthesis;
+  var logLines = [];
+  var infoEl = document.getElementById("info");
+  var logEl = document.getElementById("log");
+  function addLog(s) { logLines.push(s); logEl.value = logLines.join("\n"); logEl.scrollTop = logEl.scrollHeight; }
+  function voices() { try { return synth.getVoices() || []; } catch (e) { return []; } }
+  function nlVoices() { return voices().filter(function (v) { return /^nl/i.test(String(v.lang).replace("_", "-")); }); }
+  function showInfo() {
+    var vs = voices(), nl = nlVoices();
+    var inFrame = false; try { inFrame = window.top !== window; } catch (e) { inFrame = true; }
+    infoEl.innerHTML =
+      "<b>Spraak aanwezig:</b> " + (synth && window.SpeechSynthesisUtterance ? "ja" : "NEE") + "<br>" +
+      "<b>Aantal stemmen:</b> " + vs.length + "<br>" +
+      "<b>Nederlandse stemmen:</b> " + (nl.length ? nl.map(function (v) { return v.name + " (" + v.lang + ")"; }).join(", ") : "geen") + "<br>" +
+      "<b>Pagina in een kader:</b> " + (inFrame ? "ja" : "nee") + "<br>" +
+      "<b>Browser:</b> " + navigator.userAgent.slice(0, 120);
+    document.getElementById("b5").style.display = nl.length ? "block" : "none";
+  }
+  if (!synth || !window.SpeechSynthesisUtterance) { infoEl.textContent = "Deze browser heeft geen spraaksynthese."; return; }
+  showInfo();
+  var n = 0; var iv = setInterval(function () { showInfo(); if (++n > 10) clearInterval(iv); }, 500);
+  try { synth.addEventListener("voiceschanged", showInfo); } catch (e) {}
+
+  function run(label, text, lang, voice, rate, pitch) {
+    try { synth.cancel(); } catch (e) {}
+    try { synth.resume(); } catch (e) {}
+    var u = new SpeechSynthesisUtterance(text);
+    if (voice) { u.voice = voice; u.lang = voice.lang; } else if (lang) { u.lang = lang; }
+    if (rate) u.rate = rate; if (pitch) u.pitch = pitch;
+    var t0 = performance.now(), start = null, end = null, err = null, done = false;
+    function sec(t) { return ((t - t0) / 1000).toFixed(1) + " s"; }
+    u.onstart = function () { start = performance.now(); };
+    u.onend = function () { end = performance.now(); finish(); };
+    u.onerror = function (e) { err = e && e.error ? e.error : "onbekend"; finish(); };
+    function finish() {
+      if (done) return; done = true;
+      addLog(label + ": " + (err ? "FOUT " + err : start ? "start na " + sec(start) + (end ? ", klaar na " + sec(end) : ", nog bezig") : "GEEN start") + " | speaking=" + synth.speaking);
+    }
+    setTimeout(finish, 6000);
+    addLog("… " + label + " gestart");
+    synth.speak(u);
+  }
+  document.querySelectorAll("button[data-test]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = b.getAttribute("data-test");
+      if (t === "1") run("Test 1 (en-US)", "Hello, this is a test.", "en-US");
+      if (t === "2") run("Test 2 (nl-BE)", "Hallo, dit is een test.", "nl-BE");
+      if (t === "3") run("Test 3 (nl-NL)", "Hallo, dit is een test.", "nl-NL");
+      if (t === "4") run("Test 4 (nl)", "Hallo, dit is een test.", "nl");
+      if (t === "6") run("Test 6 (zoals de app)", "Voorlezen staat aan.", "nl-BE", null, 0.9, 0.8);
+      if (t === "5") { var v = nlVoices()[0]; if (v) run("Test 5 (" + v.name + ")", "Hallo, dit is een test.", null, v); }
+    });
+  });
+  document.getElementById("kopie").addEventListener("click", function () {
+    logEl.focus(); logEl.select();
+    var ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+    addLog(ok ? "(resultaat gekopieerd)" : "(kopiëren lukte niet: neem een screenshot)");
+  });
+})();
+</script>
+</body>
+</html>
