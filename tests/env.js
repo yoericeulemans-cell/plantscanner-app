@@ -37,7 +37,12 @@ const speech = {
   speaking: false,
   pending: false,
   getVoices() { return speech.voices; },
-  speak(u) { speech.spoken.push(u); },
+  silent: 0,             // aantal komende utterances dat stil blijft (geen start-gebeurtenis), om een telefoon na te bootsen die niets laat horen
+  speak(u) {
+    speech.spoken.push(u);
+    if (speech.silent > 0) { speech.silent--; return; }
+    realSetTimeout(() => { u.onstart && u.onstart({}); }, 0);
+  },
   cancel() { speech.cancelCount++; },
   addEventListener() {},
   removeEventListener() {},

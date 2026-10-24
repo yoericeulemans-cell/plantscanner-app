@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10";
+const APP_VERSIE = "ontwikkel · v10.1";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -430,36 +430,66 @@ function pickOption() {
 }
 function stemUitleg(o, ni, n, alle) {
   const lijst = alle.length ? alle.map((v) => v.name + " (" + v.lang + ")").join(", ") : "geen";
-  return `Stem ${ni + 1} van ${n}: ${o.label}. Stemmen die dit toestel doorgeeft (${alle.length}): ${lijst}. Versie: ${APP_VERSIE}. Tip: voor meer keuze installeer je een andere Nederlandse stem of engine in Instellingen → Tekst-naar-spraak.`;
+  return `Stem ${ni + 1} van ${n}: ${o.label}. Stemmen die dit toestel doorgeeft (${alle.length}): ${lijst}. Versie: ${APP_VERSIE}.${SPEECH_FOUT ? " Laatste stemfout: " + SPEECH_FOUT + "." : ""} Tip: voor meer keuze installeer je een andere Nederlandse stem of engine in Instellingen → Tekst-naar-spraak.`;
 }
-function speak(text) {
+let SPEECH_ID = 0; // telt mee bij elke nieuwe spreekopdracht, zodat een oude herpoging een nieuwe tekst nooit overstemt
+let SPEECH_FOUT = ""; // laatste stemfout van het toestel (komt in de uitleg van de Stem-knop)
+function speak(text, poging) {
   if (!SPEECH_OK) return;
   const t = cleanForSpeech(text);
   if (!t) return;
+  const n = poging || 0;
+  const id = n === 0 ? ++SPEECH_ID : SPEECH_ID;
   try {
     const synth = window.speechSynthesis;
     const busy = synth.speaking || synth.pending;
     synth.cancel();
     const go = () => {
+      if (id !== SPEECH_ID) return;
       try {
         const o = pickOption();
-        const v = o.voice;
+        // Poging 0: de gekozen stem. Poging 1: geen stem afdwingen, de andere taalvariant (nl-NL/nl-BE).
+        // Poging 2: algemeen "nl". Zo blijft het voorlezen werken als een telefoon de gekozen stem stil weigert.
+        const v = n === 0 ? o.voice : null;
+        const taal = n === 0 ? o.lang : n === 1 ? (o.lang === "nl-BE" ? "nl-NL" : "nl-BE") : "nl";
+        try { synth.resume(); } catch (e) {}
+        let gestart = false; let herpoging = false;
+        const volgende = () => {
+          if (herpoging || gestart || id !== SPEECH_ID || n >= 2) return;
+          herpoging = true;
+          speak(t, n + 1);
+        };
         // Zin per zin voorlezen: lange teksten blijven dan niet halverwege hangen.
-        (t.match(/[^.!?]+[.!?]*/g) || [t]).forEach((part) => {
+        (t.match(/[^.!?]+[.!?]*/g) || [t]).forEach((part, i) => {
           const p = part.trim();
           if (!p) return;
           const u = new SpeechSynthesisUtterance(p);
-          if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = o.lang; }
+          if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = taal; }
           u.rate = SPEECH_RATE;
           u.pitch = SPEECH_PITCH;
+          if (i === 0) {
+            u.onstart = () => { gestart = true; };
+            u.onboundary = () => { gestart = true; };
+            u.onerror = (ev) => {
+              const fout = String((ev && ev.error) || "onbekend");
+              if (fout === "canceled" || fout === "interrupted") return;
+              SPEECH_FOUT = fout + " (poging " + (n + 1) + ", taal " + (taal || "-") + ")";
+              volgende();
+            };
+          }
           synth.speak(u);
         });
+        // Stil blijven zonder foutmelding gebeurt ook op sommige telefoons: dan na 2,5 seconden de volgende poging.
+        setTimeout(() => {
+          if (!gestart && id === SPEECH_ID && !herpoging && n < 2) { SPEECH_FOUT = "geen geluid gestart (poging " + (n + 1) + ", taal " + (taal || "-") + ")"; volgende(); }
+        }, 2500);
       } catch (e) {}
     };
     if (busy) setTimeout(go, 60); else go();
   } catch (e) {}
 }
 function stopSpeaking() {
+  SPEECH_ID++;
   try { if (SPEECH_OK) window.speechSynthesis.cancel(); } catch (e) {}
 }
 function VoorleesKnop({ text, label }) {
