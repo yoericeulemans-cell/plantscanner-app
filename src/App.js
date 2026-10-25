@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.1";
+const APP_VERSIE = "ontwikkel · v10.2";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -428,9 +428,12 @@ function pickOption() {
   // Alleen een stem afdwingen als we zeker weten dat het een mannenstem is; anders kiest het toestel zelf.
   return eerste.voice && voiceScore(eerste.voice) >= 10 ? eerste : opts.find((o) => o.id === "__sys_BE");
 }
+const VOORLEES_HULP = "Hoor je niets? Probeer dit: 1) Zet het mediavolume van je toestel hoger (de media-balk, niet de beltoon) en zet de gsm niet op stil. 2) Open de instellingen van je toestel en zoek 'Tekst-naar-spraak'. Android/Samsung: Instellingen → Algemeen beheer → Taal → Tekst-naar-spraak. iPhone/iPad: Instellingen → Toegankelijkheid → Gesproken content → Stemmen. Druk bij Android op 'Luister naar voorbeeld': hoor je daar niets, dan ligt het aan het toestel. 3) Controleer bij de spraakmotor dat Nederlands (België of Nederland) geïnstalleerd staat, en update de spraakmotor via de Play Store of Galaxy Store. 4) Sluit de browser helemaal af en open de app opnieuw.";
+let SPEECH_MELD = null; // wordt door het hoofdscherm ingevuld: toont de hulptekst als het voorlezen niet lukt
+let SPEECH_HULP_GETOOND = false; // de hulptekst komt per sessie hoogstens één keer vanzelf tevoorschijn
 function stemUitleg(o, ni, n, alle) {
   const lijst = alle.length ? alle.map((v) => v.name + " (" + v.lang + ")").join(", ") : "geen";
-  return `Stem ${ni + 1} van ${n}: ${o.label}. Stemmen die dit toestel doorgeeft (${alle.length}): ${lijst}. Versie: ${APP_VERSIE}.${SPEECH_FOUT ? " Laatste stemfout: " + SPEECH_FOUT + "." : ""} Tip: voor meer keuze installeer je een andere Nederlandse stem of engine in Instellingen → Tekst-naar-spraak.`;
+  return `Stem ${ni + 1} van ${n}: ${o.label}. Stemmen die dit toestel doorgeeft (${alle.length}): ${lijst}. Versie: ${APP_VERSIE}.${SPEECH_FOUT ? " Laatste stemfout: " + SPEECH_FOUT + "." : ""} ${VOORLEES_HULP}`;
 }
 let SPEECH_ID = 0; // telt mee bij elke nieuwe spreekopdracht, zodat een oude herpoging een nieuwe tekst nooit overstemt
 let SPEECH_FOUT = ""; // laatste stemfout van het toestel (komt in de uitleg van de Stem-knop)
@@ -440,6 +443,7 @@ function speak(text, poging) {
   if (!t) return;
   const n = poging || 0;
   const id = n === 0 ? ++SPEECH_ID : SPEECH_ID;
+  if (n === 0) SPEECH_FOUT = "";
   try {
     const synth = window.speechSynthesis;
     const busy = synth.speaking || synth.pending;
@@ -454,9 +458,15 @@ function speak(text, poging) {
         const taal = n === 0 ? o.lang : n === 1 ? (o.lang === "nl-BE" ? "nl-NL" : "nl-BE") : "nl";
         try { synth.resume(); } catch (e) {}
         let gestart = false; let herpoging = false;
+        const opgeven = () => {
+          if (SPEECH_HULP_GETOOND || !SPEECH_MELD) return;
+          SPEECH_HULP_GETOOND = true;
+          try { SPEECH_MELD(); } catch (e) {}
+        };
         const volgende = () => {
-          if (herpoging || gestart || id !== SPEECH_ID || n >= 2) return;
+          if (herpoging || gestart || id !== SPEECH_ID) return;
           herpoging = true;
+          if (n >= 2) { opgeven(); return; }
           speak(t, n + 1);
         };
         // Zin per zin voorlezen: lange teksten blijven dan niet halverwege hangen.
@@ -481,7 +491,7 @@ function speak(text, poging) {
         });
         // Stil blijven zonder foutmelding gebeurt ook op sommige telefoons: dan na 2,5 seconden de volgende poging.
         setTimeout(() => {
-          if (!gestart && id === SPEECH_ID && !herpoging && n < 2) { SPEECH_FOUT = "geen geluid gestart (poging " + (n + 1) + ", taal " + (taal || "-") + ")"; volgende(); }
+          if (!gestart && id === SPEECH_ID && !herpoging) { SPEECH_FOUT = "geen geluid gestart (poging " + (n + 1) + ", taal " + (taal || "-") + ")"; volgende(); }
         }, 2500);
       } catch (e) {}
     };
@@ -1342,6 +1352,7 @@ function AppInner() {
   const [voorlezen, setVoorlezen] = useState(localStorage.getItem("natuurscanner_voorlezen") === "1");
   const [voiceTick, setVoiceTick] = useState(0);
   const [stemInfo, setStemInfo] = useState("");
+  useEffect(() => { SPEECH_MELD = () => setStemInfo((SPEECH_FOUT ? "Laatste stemfout: " + SPEECH_FOUT + ". " : "") + VOORLEES_HULP); return () => { SPEECH_MELD = null; }; }, []);
   const [tempo, setTempo] = useState(localStorage.getItem("natuurscanner_voorleestempo") === "langzaam" ? "langzaam" : "normaal");
 
   useEffect(() => {
@@ -2328,6 +2339,10 @@ function AppInner() {
         <>
           <button style={s.backLink} onClick={() => setScreen("home")}>← Menu</button>
           <div style={s.title}>⚙️ Instellingen</div>
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>🔊 Werkt het voorlezen niet?</div>
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>{VOORLEES_HULP}</div>
+          </div>
           
           <div style={s.card}>
             <div style={{ fontWeight: 800, marginBottom: 16, color: "#f1c40f" }}>🏫 Leerkracht Missies</div>
