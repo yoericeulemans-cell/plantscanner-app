@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PlantNet ziektetest</title>
+<style>
+:root { box-sizing: border-box; --bg: #f5f7f4; --fg: #1d2a22; --muted: #5b6b61; --card: #ffffff; --line: #cfd8d2; --accent: #1f7a4d; --accent-fg: #ffffff; --warn: #b3541e; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14201a; --fg: #e8f0ea; --muted: #9db0a4; --card: #1c2c24; --line: #2f4439; --accent: #3fbf80; --accent-fg: #0c1a12; --warn: #f0a06a; color-scheme: dark; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 620px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 6px; }
+p { margin: 0 0 12px; color: var(--muted); }
+label { display: block; font-weight: 600; margin: 14px 0 6px; }
+input[type=password], input[type=text], select { width: 100%; box-sizing: border-box; padding: 12px; font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+input[type=file] { width: 100%; }
+button { display: block; width: 100%; margin: 12px 0 0; padding: 14px; font: inherit; font-weight: 600; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-fg); }
+button:disabled { opacity: .5; }
+button.zacht { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 16px 0 0; font-size: 14px; overflow-x: auto; }
+.warn { color: var(--warn); }
+img#voorbeeld { max-width: 100%; max-height: 220px; border-radius: 10px; margin-top: 10px; display: none; }
+.rij { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.rij:last-child { border-bottom: 0; }
+pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PlantNet ziektetest</h1>
+  <p>Test of jouw eigen PlantNet-sleutel de ziektecheck mag gebruiken. De sleutel blijft in je eigen browser en gaat alleen naar PlantNet. Elke test kost 1 punt van je dagtegoed (500 per dag).</p>
+
+  <label for="sleutel">Jouw PlantNet-sleutel</label>
+  <input type="password" id="sleutel" autocomplete="off" placeholder="Plak hier je sleutel, of laat hem uit de app halen">
+  <p id="sleutelInfo"></p>
+
+  <label for="foto">Foto van één plant (blad, bloem of de plaag)</label>
+  <input type="file" id="foto" accept="image/*">
+  <img id="voorbeeld" alt="Gekozen foto">
+
+  <label for="taal">Taal van de uitleg</label>
+  <select id="taal"><option value="nl">Nederlands</option><option value="en">Engels</option><option value="fr">Frans</option></select>
+
+  <button id="knopZiekte">🔬 Test 1: ziektecheck (diseases/identify)</button>
+  <button id="knopPlant" class="zacht">🌿 Test 2: gewone plantherkenning (ter vergelijking)</button>
+
+  <div class="box" id="uitslag">Nog niets getest.</div>
+</main>
+<script>
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+  var BASIS = "https://my-api.plantnet.org/v2";
+  var blob = null;
+
+  // Sleutel uit de app halen als die op hetzelfde adres staat
+  try {
+    var bewaard = localStorage.getItem("plantscanner_plantnet_key");
+    if (bewaard) { el("sleutel").value = bewaard; el("sleutelInfo").textContent = "De sleutel uit je app is al ingevuld. Hij verlaat je browser niet, behalve naar PlantNet."; }
+    else el("sleutelInfo").textContent = "Er stond geen sleutel van de app op dit adres. Plak hem hierboven.";
+  } catch (e) { el("sleutelInfo").textContent = "Plak je sleutel hierboven."; }
+
+  // Foto verkleinen (max 1280 px) zodat het snel gaat
+  el("foto").addEventListener("change", function () {
+    var f = el("foto").files && el("foto").files[0];
+    if (!f) return;
+    var url = URL.createObjectURL(f);
+    var img = new Image();
+    img.onload = function () {
+      var max = 1280, w = img.width, h = img.height, k = Math.min(1, max / Math.max(w, h));
+      var c = document.createElement("canvas"); c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(function (b) { blob = b; el("voorbeeld").src = URL.createObjectURL(b); el("voorbeeld").style.display = "block"; }, "image/jpeg", 0.85);
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = function () { toon("<span class='warn'>Deze foto kon niet gelezen worden.</span>"); };
+    img.src = url;
+  });
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function toon(html) { el("uitslag").innerHTML = html; }
+
+  function fout(status, tekst) {
+    var uitleg = "";
+    if (status === 401 || status === 403) uitleg = "De sleutel wordt niet aanvaard voor deze route. Dat kan een verkeerde sleutel zijn, of een sleutel zonder toegang tot ziektecheck.";
+    else if (status === 404) uitleg = "Deze route bestaat niet of is niet beschikbaar voor jouw sleutel.";
+    else if (status === 429) uitleg = "Je dagtegoed is op, of je stuurt te snel na elkaar.";
+    else if (status === 400) uitleg = "PlantNet vond iets mis met de aanvraag (bijvoorbeeld de taal of de foto).";
+    else if (status === 0) uitleg = "Geen antwoord gekregen. Dit kan een netwerkprobleem zijn, of de browser laat de aanvraag niet toe.";
+    return "<b class='warn'>Mislukt" + (status ? " (HTTP " + status + ")" : "") + ".</b><br>" + esc(uitleg) + (tekst ? "<details><summary>Technisch antwoord</summary><pre>" + esc(tekst.slice(0, 1200)) + "</pre></details>" : "");
+  }
+
+  function aanvraag(soort) {
+    var sleutel = el("sleutel").value.trim();
+    if (!sleutel) { toon("<span class='warn'>Vul eerst je sleutel in.</span>"); return; }
+    if (!blob) { toon("<span class='warn'>Kies eerst een foto.</span>"); return; }
+    var url = soort === "ziekte"
+      ? BASIS + "/diseases/identify?nb-results=5&lang=" + encodeURIComponent(el("taal").value) + "&api-key=" + encodeURIComponent(sleutel)
+      : BASIS + "/identify/all?nb-results=3&lang=" + encodeURIComponent(el("taal").value) + "&api-key=" + encodeURIComponent(sleutel);
+    var form = new FormData(); form.append("images", blob, "foto.jpg"); form.append("organs", "auto");
+    var t0 = performance.now();
+    el("knopZiekte").disabled = true; el("knopPlant").disabled = true;
+    toon("Bezig… (1 punt wordt verbruikt)");
+    var status = 0;
+    fetch(url, { method: "POST", body: form }).then(function (r) {
+      status = r.status; return r.text();
+    }).then(function (tekst) {
+      var sec = ((performance.now() - t0) / 1000).toFixed(1);
+      var data = null; try { data = JSON.parse(tekst); } catch (e) {}
+      if (status < 200 || status >= 300 || !data) { toon(fout(status, tekst)); return; }
+      var h = "<b>Gelukt</b> in " + sec + " s (HTTP " + status + ").<br>";
+      if (typeof data.remainingIdentificationRequests === "number") h += "Tegoed vandaag nog over: <b>" + data.remainingIdentificationRequests + "</b><br>";
+      if (data.version) h += "Versie van de AI: " + esc(data.version) + "<br>";
+      var lijst = data.results || [];
+      h += "<div style='margin-top:8px'><b>" + (soort === "ziekte" ? "Mogelijke ziektes of plagen" : "Mogelijke planten") + " (" + lijst.length + "):</b></div>";
+      if (!lijst.length) h += "<div class='warn'>Geen resultaten. De plant of de ziekte staat waarschijnlijk niet in de lijst.</div>";
+      lijst.forEach(function (x) {
+        var naam = soort === "ziekte" ? (x.description || x.name) + (x.description && x.name ? " [" + x.name + "]" : "")
+          : ((x.species && (x.species.scientificNameWithoutAuthor || (x.species.commonNames || [])[0])) || "?");
+        h += "<div class='rij'><span>" + esc(naam) + "</span><b>" + Math.round((x.score || 0) * 100) + " %</b></div>";
+      });
+      h += "<details><summary>Ruw antwoord</summary><pre>" + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + "</pre></details>";
+      toon(h);
+    }).catch(function () { toon(fout(0, "")); }).then(function () {
+      el("knopZiekte").disabled = false; el("knopPlant").disabled = false;
+    });
+  }
+  el("knopZiekte").addEventListener("click", function () { aanvraag("ziekte"); });
+  el("knopPlant").addEventListener("click", function () { aanvraag("plant"); });
+})();
+</script>
+</body>
+</html>
