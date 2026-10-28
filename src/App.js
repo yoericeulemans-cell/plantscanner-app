@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.2";
+const APP_VERSIE = "ontwikkel · v10.3";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -427,6 +427,61 @@ function pickOption() {
   const eerste = opts[0];
   // Alleen een stem afdwingen als we zeker weten dat het een mannenstem is; anders kiest het toestel zelf.
   return eerste.voice && voiceScore(eerste.voice) >= 10 ? eerste : opts.find((o) => o.id === "__sys_BE");
+}
+const PLANTNET_ZIEKTE_DREMPEL = 0.2; // pas vanaf 20% tonen we een mogelijke ziekte of plaag
+function plantNetZiekteItems(data) {
+  const lijst = data && Array.isArray(data.results) ? data.results : [];
+  const items = lijst
+    .map((x) => ({ naam: asText(x && (x.description || x.name)), code: asText(x && x.name), score: x && typeof x.score === "number" ? x.score : 0 }))
+    .filter((x) => x.naam)
+    .sort((a, b) => b.score - a.score);
+  return {
+    sterk: items.filter((x) => x.score >= PLANTNET_ZIEKTE_DREMPEL).slice(0, 3),
+    totaal: items.length,
+    resterend: data && typeof data.remainingIdentificationRequests === "number" ? data.remainingIdentificationRequests : null,
+  };
+}
+function plantNetFoutTekst(status, tijdOver) {
+  if (status === 403) return "PlantNet weigert je sleutel op dit adres. Maak in je PlantNet-account je sleutel openbaar en zet dit adres bij 'Geautoriseerde domeinen'.";
+  if (status === 401) return "PlantNet kent deze sleutel niet. Controleer de sleutel in Instellingen.";
+  if (status === 404) return "Voor deze foto is er geen ziektecheck beschikbaar.";
+  if (status === 429) return "Je dagtegoed bij PlantNet is op. Probeer morgen opnieuw.";
+  if (status === 0) return tijdOver ? "PlantNet antwoordt niet binnen 20 seconden. Probeer het straks opnieuw." : "Geen verbinding met PlantNet. Controleer je internet, en of je sleutel openbaar gemaakt is voor dit adres.";
+  return "PlantNet gaf een fout (HTTP " + status + ").";
+}
+function PlantNetZiekteKaart({ staat, onStart, cardStyle }) {
+  const knop = { width: "100%", padding: 12, borderRadius: 12, border: "none", background: "rgba(46, 204, 113, 0.9)", color: "#0b2b1b", fontWeight: 700, fontSize: 15, cursor: "pointer" };
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontWeight: 800, marginBottom: 8, color: "#a8e6cf", fontSize: 18 }}>🔬 Extra ziektecheck (PlantNet)</div>
+      {!staat && (
+        <>
+          <div style={{ fontSize: 14, marginBottom: 10 }}>Vraag PlantNet om een tweede mening over mogelijke ziektes of plagen op deze foto. Dit kost 1 punt van je dagtegoed bij PlantNet.</div>
+          <button style={knop} onClick={onStart}>Ziektecheck uitvoeren</button>
+        </>
+      )}
+      {staat && staat.bezig && <div style={{ fontSize: 15 }}>Bezig met PlantNet…</div>}
+      {staat && staat.fout && (
+        <>
+          <div style={{ fontSize: 14, marginBottom: 10 }}>⚠️ {staat.fout}</div>
+          <button style={knop} onClick={onStart}>Opnieuw proberen</button>
+        </>
+      )}
+      {staat && staat.sterk && (
+        <>
+          {staat.sterk.length === 0 ? (
+            <div style={{ fontSize: 15 }}>PlantNet ziet op deze foto geen duidelijke ziekte of plaag (geen resultaat boven {Math.round(PLANTNET_ZIEKTE_DREMPEL * 100)}%). Dat is geen garantie dat de plant gezond is.</div>
+          ) : (
+            <div style={{ fontSize: 15, lineHeight: "1.7" }}>
+              <div style={{ marginBottom: 4 }}>PlantNet vermoedt mogelijk:</div>
+              {staat.sterk.map((x) => <div key={x.code + x.naam}>• {x.naam} ({Math.round(x.score * 100)}%)</div>)}
+            </div>
+          )}
+          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 10 }}>Dit is een AI-schatting van PlantNet en geen zekerheid. Twijfel je? Vraag raad aan een tuincentrum of een specialist.{staat.resterend !== null ? " Tegoed vandaag nog over: " + staat.resterend + "." : ""}</div>
+        </>
+      )}
+    </div>
+  );
 }
 const VOORLEES_HULP = "Hoor je niets? Probeer dit: 1) Zet het mediavolume van je toestel hoger (de media-balk, niet de beltoon) en zet de gsm niet op stil. 2) Open de instellingen van je toestel en zoek 'Tekst-naar-spraak'. Android/Samsung: Instellingen → Algemeen beheer → Taal → Tekst-naar-spraak. iPhone/iPad: Instellingen → Toegankelijkheid → Gesproken content → Stemmen. Druk bij Android op 'Luister naar voorbeeld': hoor je daar niets, dan ligt het aan het toestel. 3) Controleer bij de spraakmotor dat Nederlands (België of Nederland) geïnstalleerd staat, en update de spraakmotor via de Play Store of Galaxy Store. 4) Sluit de browser helemaal af en open de app opnieuw.";
 let SPEECH_MELD = null; // wordt door het hoofdscherm ingevuld: toont de hulptekst als het voorlezen niet lukt
@@ -1321,6 +1376,8 @@ function AppInner() {
   const [opslagVol, setOpslagVol] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [result, setResult] = useState(null);
+  const [ziekteNet, setZiekteNet] = useState(null);
+  useEffect(() => { setZiekteNet(null); }, [result && result.id]);
   const [liveApiUsage, setLiveApiUsage] = useState(0);
 
   const [currentQuizQuestions, setCurrentQuizQuestions] = useState([]);
@@ -1903,6 +1960,23 @@ function AppInner() {
     throw lastErr;
   }
 
+  async function plantNetZiekteCheck() {
+    if (!result || !result.image) return;
+    const sleutel = String(keys.plantNet || "").trim();
+    if (!sleutel) { setZiekteNet({ fout: "Vul eerst je PlantNet-sleutel in bij ⚙️ Instellingen." }); return; }
+    setZiekteNet({ bezig: true });
+    try {
+      const blob = await (await fetch(result.image)).blob();
+      const form = new FormData();
+      form.append("images", blob, "foto.jpg");
+      form.append("organs", "auto");
+      const r = await fetchWithTimeout(`https://my-api.plantnet.org/v2/diseases/identify?nb-results=5&lang=nl&api-key=${encodeURIComponent(sleutel)}`, { method: "POST", body: form }, 20000);
+      if (!r.ok) { setZiekteNet({ fout: plantNetFoutTekst(r.status) }); return; }
+      setZiekteNet(plantNetZiekteItems(await r.json()));
+    } catch (e) {
+      setZiekteNet({ fout: plantNetFoutTekst(0, e && e.name === "AbortError") });
+    }
+  }
   async function identifyPlant(base64) {
     const { plantId, plantNet, gemini } = keys;
     // Zonder enige sleutel kan geen enkele bron werken: toon dan de melding "er ontbreekt een instelling"
@@ -2140,6 +2214,10 @@ function AppInner() {
           <div style={t.title}>{kidsMode ? "🌿 NatuurScanner" : "🌿 PlantScanner"}</div>
           <div style={t.subtitle}>{kidsMode ? "Ontdek en leer over de natuur!" : "Identificeer planten en dieren."}</div>
           <div style={{ textAlign: "center", fontSize: 11, opacity: 0.45, marginTop: -6, marginBottom: 8 }}>v: {APP_VERSIE}</div>
+          <div style={{ textAlign: "center", fontSize: 11, opacity: 0.7, marginBottom: 10 }}>
+            Plantherkenning via de Pl@ntNet-API · my.plantnet.org
+            <div><img src="https://my.plantnet.org/images/powered-by-plantnet-light.png" alt="Powered by Pl@ntNet" style={{ height: 26, background: "#fff", borderRadius: 8, padding: "2px 8px", marginTop: 4 }} onError={(ev) => { ev.currentTarget.style.display = "none"; }} /></div>
+          </div>
 
           <button style={t.bigButton} onClick={() => openCamera("general")}>🌱 Scan Plant (Camera)</button>
           <button style={{ ...t.bigButton, background: "linear-gradient(135deg, #3498db 0%, #2980b9 100%)" }} onClick={() => openCamera("animal")}>🦋 Scan Dier (Camera)</button>
@@ -2221,6 +2299,7 @@ function AppInner() {
 
               <PlantGezondheidKaart health={result.health} cardStyle={t.card} />
               <DubbelcheckKaart controles={result.controles} cardStyle={t.card} />
+              {!kidsMode && <PlantNetZiekteKaart staat={ziekteNet} onStart={plantNetZiekteCheck} cardStyle={t.card} />}
 
               <GiftigKaart g={result.giftigheid} kids={kidsMode} cardStyle={t.card} />
               <EetWaarschuwing name={result.name} cardStyle={t.card} />
