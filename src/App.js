@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.3";
+const APP_VERSIE = "ontwikkel · v10.4";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -428,6 +428,7 @@ function pickOption() {
   // Alleen een stem afdwingen als we zeker weten dat het een mannenstem is; anders kiest het toestel zelf.
   return eerste.voice && voiceScore(eerste.voice) >= 10 ? eerste : opts.find((o) => o.id === "__sys_BE");
 }
+const LS_ZIEKTE_NET = "plantscanner_ziekte_plantnet"; // schakelaar in Instellingen (standaard uit)
 const PLANTNET_ZIEKTE_DREMPEL = 0.2; // pas vanaf 20% tonen we een mogelijke ziekte of plaag
 function plantNetZiekteItems(data) {
   const lijst = data && Array.isArray(data.results) ? data.results : [];
@@ -1377,6 +1378,8 @@ function AppInner() {
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [result, setResult] = useState(null);
   const [ziekteNet, setZiekteNet] = useState(null);
+  const [ziekteNetAan, setZiekteNetAan] = useState(localStorage.getItem(LS_ZIEKTE_NET) === "1");
+  useEffect(() => { localStorage.setItem(LS_ZIEKTE_NET, ziekteNetAan ? "1" : "0"); }, [ziekteNetAan]);
   useEffect(() => { setZiekteNet(null); }, [result && result.id]);
   const [liveApiUsage, setLiveApiUsage] = useState(0);
 
@@ -2299,7 +2302,7 @@ function AppInner() {
 
               <PlantGezondheidKaart health={result.health} cardStyle={t.card} />
               <DubbelcheckKaart controles={result.controles} cardStyle={t.card} />
-              {!kidsMode && <PlantNetZiekteKaart staat={ziekteNet} onStart={plantNetZiekteCheck} cardStyle={t.card} />}
+              {!kidsMode && ziekteNetAan && keys.plantNet && <PlantNetZiekteKaart staat={ziekteNet} onStart={plantNetZiekteCheck} cardStyle={t.card} />}
 
               <GiftigKaart g={result.giftigheid} kids={kidsMode} cardStyle={t.card} />
               <EetWaarschuwing name={result.name} cardStyle={t.card} />
@@ -2418,6 +2421,11 @@ function AppInner() {
         <>
           <button style={s.backLink} onClick={() => setScreen("home")}>← Menu</button>
           <div style={s.title}>⚙️ Instellingen</div>
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>🔬 PlantNet-ziektecheck</div>
+            <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>Toon de knop "Extra ziektecheck" bij planten. Dit werkt alleen met een PlantNet-sleutel die je in je PlantNet-account openbaar gemaakt hebt voor het adres van deze app (Instellingen → API-sleutel → "mijn API-sleutel openbaar maken"). Elke check kost 1 punt van je dagtegoed.</div>
+            <button onClick={() => setZiekteNetAan(!ziekteNetAan)} aria-pressed={ziekteNetAan} style={{ width: "100%", padding: 12, borderRadius: 12, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", background: ziekteNetAan ? "rgba(46, 204, 113, 0.9)" : "rgba(255,255,255,0.15)", color: ziekteNetAan ? "#0b2b1b" : "#fff" }}>{ziekteNetAan ? "✅ Ziektecheck bij planten: AAN" : "⬜ Ziektecheck bij planten: UIT"}</button>
+          </div>
           <div style={s.card}>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>🔊 Werkt het voorlezen niet?</div>
             <div style={{ fontSize: 13, lineHeight: 1.5 }}>{VOORLEES_HULP}</div>

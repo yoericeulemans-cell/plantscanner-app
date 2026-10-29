@@ -106,7 +106,7 @@ const setKids = () => click(/🧒 Uit/);
 // =====================================================================================
 test("A1 versie en data-aantallen", "controle", () => {
   const { T } = fresh();
-  eq(T.APP_VERSIE, "ontwikkel · v10.3", "APP_VERSIE");
+  eq(T.APP_VERSIE, "ontwikkel · v10.4", "APP_VERSIE");
   eq(T.ALL_QUIZ_QUESTIONS.length, 174, "aantal quizvragen (147 + 27 nieuwe)");
   const per = { 1: 0, 2: 0, 3: 0 };
   T.ALL_QUIZ_QUESTIONS.forEach((q) => { per[q.niveau] = (per[q.niveau] || 0) + 1; });
@@ -222,7 +222,7 @@ test("B3 giftigheid en voorlezen-tekst", "controle", () => {
 // =====================================================================================
 test("C1 startscherm", "controle", () => {
   const { App } = fresh(); mount(App);
-  ok(hasText("v: ontwikkel · v10.3"), "versienummer onder de titel");
+  ok(hasText("v: ontwikkel · v10.4"), "versienummer onder de titel");
   for (const l of ["Scan Plant (Camera)", "Scan Dier (Camera)", "Upload Plant", "Upload Dier", "Geschiedenis (0)", "Instellingen"]) ok(hasText(l), "knop: " + l);
   ok(!hasText("Natuur Safari") && !hasText("Natuur Quiz"), "safari/quiz verborgen zonder kindermodus");
   const bar = btn("Instellingen").parentElement;
@@ -276,7 +276,7 @@ test("C4 voorlezen, tempo en stem (telefoon zonder Nederlandse stemmen)", "contr
   eq(speech.spoken[0].rate, 0.9, "tempo normaal 0,9");
   click("Stem 1/2");
   ok(hasText("Stem 2/2"), "stem wisselt naar 2/2");
-  ok(hasText("Versie: ontwikkel · v10.3"), "stem-uitleg toont versie");
+  ok(hasText("Versie: ontwikkel · v10.4"), "stem-uitleg toont versie");
   eq(speech.spoken[speech.spoken.length - 1].lang, "nl-NL", "tweede stem = nl-NL");
   click("🐇 Normaal");
   ok(hasText("🐢 Traag"), "tempo wisselt naar traag");
@@ -537,7 +537,7 @@ test("D2 plantscan: bronnen-volgorde (Plant.id > PlantNet > Gemini)", "scan", as
   eq(geminiCalls(), 1, "daglimiet wordt niet herprobeerd");
 });
 test("N1 PlantNet-ziektecheck: knop, drempel, geen automatische aanvraag", "scan", async () => {
-  const r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); mount(r.App);
+  const r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); localStorage.setItem("plantscanner_ziekte_plantnet", "1"); mount(r.App);
   let calls = 0, lastUrl = "", lastForm = null;
   global.__net.handler = (u, o) => {
     if (u.includes("diseases")) { calls++; lastUrl = u; lastForm = o && o.body; return { status: 200, json: { results: [{ name: "APHISP", description: "Bladluizen", score: 0.62 }, { name: "ERYSAM", description: "Meeldauw", score: 0.25 }, { name: "PUCCSP", description: "Roest", score: 0.05 }], remainingIdentificationRequests: 480 } }; }
@@ -557,25 +557,38 @@ test("N1 PlantNet-ziektecheck: knop, drempel, geen automatische aanvraag", "scan
   ok(lastForm && typeof lastForm.get === "function" && lastForm.get("organs") === "auto", "foto en organs=auto meegestuurd");
 });
 test("N2 PlantNet-ziektecheck: fouten, geen sleutel, kindermodus, dier", "scan", async () => {
-  let r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); mount(r.App);
+  let r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); localStorage.setItem("plantscanner_ziekte_plantnet", "1"); mount(r.App);
   let status = 403;
   global.__net.handler = (u) => u.includes("diseases") ? { status, text: JSON.stringify({ message: "CORS error: Origin not allowed" }) } : isGemini(u) ? gemOk(PLANT) : { status: 404 };
   uploadFile(0); await waitText("Madeliefje");
   click("Ziektecheck uitvoeren"); await waitText("Geautoriseerde domeinen");
   ok(hasText("Opnieuw proberen"), "bij een fout kan je opnieuw proberen");
   status = 429; click("Opnieuw proberen"); await waitText("dagtegoed");
-  r = fresh(); setKeys({ gemini: "K" }); mount(r.App);
+  r = fresh(); setKeys({ gemini: "K" }); localStorage.setItem("plantscanner_ziekte_plantnet", "1"); mount(r.App);
   global.__net.handler = (u) => isGemini(u) ? gemOk(PLANT) : { status: 404 };
   uploadFile(0); await waitText("Madeliefje");
-  click("Ziektecheck uitvoeren"); await waitText("Vul eerst je PlantNet-sleutel in");
-  r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); localStorage.setItem("plantscanner_kids_mode", "1"); mount(r.App);
+  ok(!hasText("Extra ziektecheck"), "zonder PlantNet-sleutel geen ziektecheckknop");
+  r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); localStorage.setItem("plantscanner_kids_mode", "1"); localStorage.setItem("plantscanner_ziekte_plantnet", "1"); mount(r.App);
   global.__net.handler = (u) => isGemini(u) ? gemOk(PLANT) : { status: 404 };
   uploadFile(0); await waitText("Madeliefje");
   ok(!hasText("Extra ziektecheck"), "kindermodus toont de ziektecheck niet");
-  r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); mount(r.App);
+  r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); localStorage.setItem("plantscanner_ziekte_plantnet", "1"); mount(r.App);
   global.__net.handler = () => gemOk(ANIMAL);
   uploadFile(1); await waitText("Rode vos");
   ok(!hasText("Extra ziektecheck"), "geen ziektecheckkaart bij een dier");
+});
+test("N4 PlantNet-ziektecheck staat standaard uit en heeft een schakelaar in Instellingen", "scan", async () => {
+  const r = fresh(); setKeys({ gemini: "K", plantNet: "N" }); mount(r.App);
+  global.__net.handler = (u) => isGemini(u) ? gemOk(PLANT) : { status: 404 };
+  uploadFile(0); await waitText("Madeliefje");
+  ok(!hasText("Extra ziektecheck"), "standaard geen ziektecheckknop, ook niet met PlantNet-sleutel");
+  click("Terug");
+  await unlockSettings();
+  ok(hasText("🔬 PlantNet-ziektecheck"), "schakelaarkaart in Instellingen");
+  ok(hasText("Ziektecheck bij planten: UIT"), "schakelaar staat standaard uit");
+  click(/Ziektecheck bij planten: UIT/);
+  ok(hasText("Ziektecheck bij planten: AAN"), "schakelaar springt naar AAN");
+  eq(localStorage.getItem("plantscanner_ziekte_plantnet"), "1", "schakelaar wordt bewaard");
 });
 test("N3 PlantNet-hulpfuncties", "controle", () => {
   const T = fresh().T;
@@ -1465,7 +1478,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   for (let i = 0; i < 250; i++) T.logDiag({ type: "plant", naam: "n" + i });
   const l = T.loadDiag();
   ok(l.length === 200 && l[0].naam === "n249", "logboek bewaart de laatste 200, nieuwste eerst");
-  ok(l[0].v === "ontwikkel · v10.3" && typeof l[0].t === "string", "elk item heeft versie en tijd");
+  ok(l[0].v === "ontwikkel · v10.4" && typeof l[0].t === "string", "elk item heeft versie en tijd");
   const r = fresh(); setKeys({ gemini: "GEHEIM-SLEUTEL-123" }); mount(r.App);
   global.__net.handler = () => gemOk(PLANT);
   uploadFile(0); await waitText("Madeliefje"); click("Terug");
@@ -1489,7 +1502,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   ok(/^natuurscanner-diagnose-\d{4}-\d{2}-\d{2}\.json$/.test(global.__downloads[0].download), "bestandsnaam: " + global.__downloads[0].download);
   const tekst = await new Promise((res) => { const fr = new window.FileReader(); fr.onload = () => res(fr.result); fr.readAsText(global.__lastBlob); });
   const d = JSON.parse(tekst);
-  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.3" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
+  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.4" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
   ok(!tekst.includes("data:image") && !tekst.includes("GEHEIM-SLEUTEL-123"), "export bevat geen foto's en geen sleutels");
   ok(hasText("Diagnose-export gemaakt (3 scans"), "bevestiging getoond");
   click("Logboek wissen"); ok(hasText("Logboek: 0 scans") && hasText("Logboek gewist"), "logboek wissen werkt");
