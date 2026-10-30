@@ -67,9 +67,19 @@ global.Image = class {
   }
 };
 w.Image = global.Image;
-global.__canvas = { draws: [], dataUrlCalls: [] };
+global.__canvas = { draws: [], dataUrlCalls: [], scherpOf: null };
 w.HTMLCanvasElement.prototype.getContext = function () {
-  return { drawImage: (...a) => global.__canvas.draws.push(a) };
+  const cv = this;
+  return {
+    drawImage: (...a) => { global.__canvas.draws.push(a); cv.__laatste = a[0]; },
+    // beeldgegevens voor de scherptemeting: scherp = schaakbordpatroon, wazig = vlak grijs
+    getImageData: (x, y, w, h) => {
+      const scherp = global.__canvas.scherpOf ? global.__canvas.scherpOf(cv.__laatste) : false;
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < w * h; i++) { const v = scherp ? ((i + Math.floor(i / w)) % 2 ? 255 : 0) : 128; data[i * 4] = v; data[i * 4 + 1] = v; data[i * 4 + 2] = v; data[i * 4 + 3] = 255; }
+      return { data, width: w, height: h };
+    },
+  };
 };
 w.HTMLCanvasElement.prototype.toDataURL = function (type, q) {
   global.__canvas.dataUrlCalls.push([type, q, this.width, this.height]);

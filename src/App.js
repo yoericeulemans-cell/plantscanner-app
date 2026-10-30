@@ -410,7 +410,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.4";
+const APP_VERSIE = "ontwikkel · v10.5";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -427,6 +427,65 @@ function pickOption() {
   const eerste = opts[0];
   // Alleen een stem afdwingen als we zeker weten dat het een mannenstem is; anders kiest het toestel zelf.
   return eerste.voice && voiceScore(eerste.voice) >= 10 ? eerste : opts.find((o) => o.id === "__sys_BE");
+}
+// ---------- Scherpte van een camerabeeld ----------
+// Variantie van een eenvoudige Laplace-filter op de grijswaarden: scherpe beelden hebben veel
+// scherpe overgangen (hoge waarde), wazige beelden weinig (lage waarde).
+function scherpteScore(rgba, w, h) {
+  if (!rgba || w < 3 || h < 3) return 0;
+  const g = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < w * h; i++, p += 4) g[i] = 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2];
+  let som = 0, som2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w];
+      som += l; som2 += l * l; n++;
+    }
+  }
+  const gem = som / n;
+  return som2 / n - gem * gem;
+}
+function scherpteVanBeeld(bron, crop) {
+  try {
+    const klein = document.createElement("canvas");
+    klein.width = 256;
+    const bw = crop ? crop.sw : (bron.width || bron.videoWidth || 256);
+    const bh = crop ? crop.sh : (bron.height || bron.videoHeight || 256);
+    klein.height = Math.max(16, Math.round(256 * (bh / bw)));
+    const kctx = klein.getContext("2d");
+    if (crop) kctx.drawImage(bron, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, klein.width, klein.height);
+    else kctx.drawImage(bron, 0, 0, klein.width, klein.height);
+    const d = kctx.getImageData(0, 0, klein.width, klein.height);
+    return scherpteScore(d.data, d.width, d.height);
+  } catch (e) {
+    return 0;
+  }
+}
+// Neemt tot 5 beelden vlak na elkaar en tekent het scherpste op het canvas. Lukt dat niet
+// (oudere browser), dan blijft het gewoon bij één beeld, zoals voorheen.
+async function tekenScherpsteFrame(video, ctx, width, height, crop) {
+  const kandidaten = [];
+  try {
+    if (typeof window.createImageBitmap === "function") {
+      for (let i = 0; i < 5; i++) {
+        const bmp = await window.createImageBitmap(video);
+        kandidaten.push({ bmp, score: scherpteVanBeeld(bmp, crop) });
+        if (i < 4) await new Promise((r) => setTimeout(r, 80));
+      }
+    }
+  } catch (e) {}
+  if (kandidaten.length) {
+    let beste = kandidaten[0];
+    for (const k of kandidaten) if (k.score > beste.score) beste = k;
+    const b = beste.bmp;
+    if (crop) ctx.drawImage(b, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height);
+    else ctx.drawImage(b, 0, 0, b.width || width, b.height || height, 0, 0, width, height);
+    kandidaten.forEach((k) => { try { if (k.bmp && k.bmp.close) k.bmp.close(); } catch (e) {} });
+    return;
+  }
+  if (crop) ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height);
+  else ctx.drawImage(video, 0, 0, width, height);
 }
 const LS_ZIEKTE_NET = "plantscanner_ziekte_plantnet"; // schakelaar in Instellingen (standaard uit)
 const PLANTNET_ZIEKTE_DREMPEL = 0.2; // pas vanaf 20% tonen we een mogelijke ziekte of plaag
@@ -1406,6 +1465,7 @@ function AppInner() {
   const [scanMode, setScanMode] = useState("general");
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [focusRing, setFocusRing] = useState(null);
   const [zoomSupported, setZoomSupported] = useState(false);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1, step: 0.1 });
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -1501,6 +1561,29 @@ function AppInner() {
       } catch (fallbackErr) {
         setCameraError("Camera niet beschikbaar op dit apparaat. Gebruik de knop hieronder om een foto te kiezen.");
       }
+    }
+  };
+
+  const focusOpPunt = async (ev) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    const r = ev.currentTarget.getBoundingClientRect();
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    setFocusRing({ x, y });
+    setTimeout(() => setFocusRing(null), 900);
+    if (!track || typeof track.applyConstraints !== "function" || typeof track.getCapabilities !== "function") return;
+    const modes = (track.getCapabilities() || {}).focusMode || [];
+    if (!modes.includes("single-shot") && !modes.includes("continuous")) return;
+    const nx = r.width > 0 ? Math.min(1, Math.max(0, x / r.width)) : 0.5;
+    const ny = r.height > 0 ? Math.min(1, Math.max(0, y / r.height)) : 0.5;
+    const stand = modes.includes("single-shot") ? "single-shot" : "continuous";
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: stand, pointsOfInterest: [{ x: nx, y: ny }] }] });
+    } catch (e1) {
+      try { await track.applyConstraints({ advanced: [{ focusMode: stand }] }); } catch (e2) {}
+    }
+    // Na het scherpstellen weer continue autofocus, zodat bewegen niet vastgeklikt blijft.
+    if (stand === "single-shot" && modes.includes("continuous")) {
+      setTimeout(() => { try { track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {} }, 1200);
     }
   };
 
@@ -1601,9 +1684,9 @@ function AppInner() {
       const srcH = video.videoHeight / zoomLevel;
       const srcX = (video.videoWidth - srcW) / 2;
       const srcY = (video.videoHeight - srcH) / 2;
-      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, width, height);
+      await tekenScherpsteFrame(video, ctx, width, height, { sx: srcX, sy: srcY, sw: srcW, sh: srcH });
     } else {
-      ctx.drawImage(video, 0, 0, width, height);
+      await tekenScherpsteFrame(video, ctx, width, height, null);
     }
     const dataUrl = canvas.toDataURL("image/jpeg", 0.90);
     const currentMode = scanMode;
@@ -2145,7 +2228,9 @@ function AppInner() {
             </div>
           ) : (
             <>
-              <video ref={videoRef} playsInline autoPlay muted style={{ width: "100%", height: "100vh", objectFit: "cover", transform: !zoomSupported && zoomLevel > 1 ? `scale(${zoomLevel})` : "none", transition: "transform 0.1s linear" }} />
+              <video ref={videoRef} playsInline autoPlay muted onClick={focusOpPunt} style={{ width: "100%", height: "100vh", objectFit: "cover", transform: !zoomSupported && zoomLevel > 1 ? `scale(${zoomLevel})` : "none", transition: "transform 0.1s linear" }} />
+              <div style={{ position: "absolute", top: 34, left: 16, right: 90, color: "#fff", fontSize: 13, fontWeight: 600, textShadow: "0 1px 3px rgba(0,0,0,0.9)", pointerEvents: "none" }}>📏 Houd 20–30 cm afstand en tik op het beeld om scherp te stellen.</div>
+              {focusRing && <div style={{ position: "absolute", left: focusRing.x - 32, top: focusRing.y - 32, width: 64, height: 64, border: "3px solid #2ecc71", borderRadius: "50%", pointerEvents: "none" }} />}
               {torchSupported && (
                 <button onClick={toggleTorch} style={{ position: "absolute", top: 30, right: 20, background: torchOn ? "#f1c40f" : "rgba(0,0,0,0.6)", color: "#fff", borderRadius: "50%", width: 55, height: 55, fontSize: 26, cursor: "pointer", border: "none" }}>
                   {torchOn ? "🔦" : "💡"}

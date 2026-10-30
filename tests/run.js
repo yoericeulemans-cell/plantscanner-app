@@ -26,7 +26,7 @@ export const __T = { APP_VERSIE, ALL_QUIZ_QUESTIONS, SAFARI_MISSIES, friendlyErr
   loadStats, updateStats, EET_WAARSCHUWING, PADDENSTOEL_WAARSCHUWING, ErrorBoundary, cleanEntry, asText, SAFARI_SEIZOEN, huidigSeizoen, SEIZOEN_NAAM, gevaarWaarschuwingen, GEVAAR_SOORTEN,
   normGezond, gezondheidToestand, herfstNotitie, GEZOND_UITLEG,
   giftControle, problemenInTekst, latijnUit, vergelijkBronnen, bouwPlantControles, bouwDierControles, cleanControles, BEKENDE_GIFTIG,
-  loadDiag, logDiag, makeDiagExport, DIAG_KEY, diagVoorScan, plantNetZiekteItems, plantNetFoutTekst };
+  loadDiag, logDiag, makeDiagExport, DIAG_KEY, diagVoorScan, plantNetZiekteItems, plantNetFoutTekst, scherpteScore };
 `;
 const entry = path.join(BUILD_DIR, "entry.js");
 fs.writeFileSync(entry, src + "\n" + FOOTER);
@@ -44,7 +44,7 @@ function fresh() {
   global.__cam.mode = "ok"; global.__cam.caps = { zoom: { min: 1, max: 5, step: 0.1 }, torch: true };
   global.__cam.applied.length = 0; global.__cam.stopped = 0; global.__cam.getUserMediaCalls.length = 0;
   global.__imageCapture.enabled = true; global.__imageCapture.calls = 0;
-  global.__canvas.draws.length = 0; global.__canvas.dataUrlCalls.length = 0;
+  global.__canvas.draws.length = 0; global.__canvas.dataUrlCalls.length = 0; global.__canvas.scherpOf = null; delete window.createImageBitmap;
   global.__downloads.length = 0; global.__lastBlob = null;
   global.__img.fail = false; global.__img.width = 3000; global.__img.height = 2000;
   window.confirm = () => true;
@@ -106,7 +106,7 @@ const setKids = () => click(/🧒 Uit/);
 // =====================================================================================
 test("A1 versie en data-aantallen", "controle", () => {
   const { T } = fresh();
-  eq(T.APP_VERSIE, "ontwikkel · v10.4", "APP_VERSIE");
+  eq(T.APP_VERSIE, "ontwikkel · v10.5", "APP_VERSIE");
   eq(T.ALL_QUIZ_QUESTIONS.length, 174, "aantal quizvragen (147 + 27 nieuwe)");
   const per = { 1: 0, 2: 0, 3: 0 };
   T.ALL_QUIZ_QUESTIONS.forEach((q) => { per[q.niveau] = (per[q.niveau] || 0) + 1; });
@@ -222,7 +222,7 @@ test("B3 giftigheid en voorlezen-tekst", "controle", () => {
 // =====================================================================================
 test("C1 startscherm", "controle", () => {
   const { App } = fresh(); mount(App);
-  ok(hasText("v: ontwikkel · v10.4"), "versienummer onder de titel");
+  ok(hasText("v: ontwikkel · v10.5"), "versienummer onder de titel");
   for (const l of ["Scan Plant (Camera)", "Scan Dier (Camera)", "Upload Plant", "Upload Dier", "Geschiedenis (0)", "Instellingen"]) ok(hasText(l), "knop: " + l);
   ok(!hasText("Natuur Safari") && !hasText("Natuur Quiz"), "safari/quiz verborgen zonder kindermodus");
   const bar = btn("Instellingen").parentElement;
@@ -276,7 +276,7 @@ test("C4 voorlezen, tempo en stem (telefoon zonder Nederlandse stemmen)", "contr
   eq(speech.spoken[0].rate, 0.9, "tempo normaal 0,9");
   click("Stem 1/2");
   ok(hasText("Stem 2/2"), "stem wisselt naar 2/2");
-  ok(hasText("Versie: ontwikkel · v10.4"), "stem-uitleg toont versie");
+  ok(hasText("Versie: ontwikkel · v10.5"), "stem-uitleg toont versie");
   eq(speech.spoken[speech.spoken.length - 1].lang, "nl-NL", "tweede stem = nl-NL");
   click("🐇 Normaal");
   ok(hasText("🐢 Traag"), "tempo wisselt naar traag");
@@ -700,6 +700,41 @@ test("E1 camera: zoom, zaklamp, ImageCapture en afsluiten", "scan", async () => 
   eq(global.__imageCapture.calls, 1, "ImageCapture.takePhoto gebruikt");
   ok(global.__cam.stopped >= 1, "camera-stream gestopt na foto");
   ok(global.__canvas.draws.every((d) => !(d[0] instanceof window.HTMLVideoElement)), "geen videoframe getekend (ImageCapture-route; enkel het verkleinen van de foto)");
+});
+test("E3 camera: afstandstip en tik om scherp te stellen", "scan", async () => {
+  let r = fresh(); setKeys({ gemini: "K" }); global.__cam.caps = { zoom: { min: 1, max: 5, step: 0.1 }, focusMode: ["continuous", "single-shot"] }; mount(r.App);
+  click("Scan Plant (Camera)"); await waitFor(() => { if (!document.querySelector("video")) throw new Error("camera"); });
+  ok(hasText("Houd 20–30 cm afstand"), "afstandstip op het camerascherm");
+  fireEvent.click(document.querySelector("video"));
+  await waitFor(() => { if (!global.__cam.applied.some((c) => c.advanced && c.advanced[0].focusMode === "single-shot" && c.advanced[0].pointsOfInterest)) throw new Error("scherpstellen niet gevraagd"); });
+  ok(true, "tik vraagt een eenmalige scherpstelling met scherpstelpunt");
+  await waitFor(() => { if (!global.__cam.applied.some((c) => c.advanced && c.advanced[0].focusMode === "continuous" && !c.advanced[0].pointsOfInterest)) throw new Error("niet teruggezet"); });
+  ok(true, "daarna weer continue autofocus");
+  r = fresh(); setKeys({ gemini: "K" }); global.__cam.caps = { zoom: { min: 1, max: 5, step: 0.1 } }; mount(r.App);
+  click("Scan Plant (Camera)"); await waitFor(() => { if (!document.querySelector("video")) throw new Error("camera"); });
+  const voor = global.__cam.applied.length;
+  fireEvent.click(document.querySelector("video"));
+  await new Promise((rs) => setTimeout(rs, 50));
+  eq(global.__cam.applied.length, voor, "camera zonder scherpstelstanden: tik doet niets stuk");
+});
+test("E4 camera: scherpste beeld van een reeks kiezen", "scan", async () => {
+  const T = fresh().T;
+  const scherp = new Uint8ClampedArray(16 * 16 * 4), vlak = new Uint8ClampedArray(16 * 16 * 4);
+  for (let i = 0; i < 256; i++) { const v = (i + Math.floor(i / 16)) % 2 ? 255 : 0; scherp.set([v, v, v, 255], i * 4); vlak.set([128, 128, 128, 255], i * 4); }
+  ok(T.scherpteScore(scherp, 16, 16) > T.scherpteScore(vlak, 16, 16) + 1000, "scherpteScore: scherp beeld scoort hoger dan vlak beeld");
+  eq(T.scherpteScore(null, 0, 0), 0, "ongeldige invoer geeft 0");
+  const r = fresh(); setKeys({ gemini: "K" }); global.__imageCapture.enabled = false; mount(r.App);
+  let n = 0; const frames = [];
+  window.createImageBitmap = async () => { const b = { id: ++n, width: 1280, height: 720, close() {} }; frames.push(b); return b; };
+  global.__canvas.scherpOf = (src) => !!src && src.id === 3;
+  global.__net.handler = () => gemOk(PLANT);
+  click("Scan Plant (Camera)"); await waitFor(() => { if (!document.querySelector("video")) throw new Error("v"); });
+  fireEvent.click(screen.getAllByRole("button").find((b) => b.textContent === ""));
+  await waitText("Madeliefje");
+  eq(frames.length, 5, "vijf beelden genomen");
+  const getekend = global.__canvas.draws.find((a) => a.length === 9 && a[0] && a[0].id !== undefined && a[5] === 0 && a[7] > 0);
+  ok(getekend && getekend[0].id === 3, "het scherpste beeld (nummer 3) is gekozen");
+  ok(frames.every((f) => f.id), "alle beelden aangemaakt");
 });
 test("E2 camera: terugval zonder ImageCapture + digitale zoom + geweigerd", "scan", async () => {
   // zonder ImageCapture -> videoframe via canvas
@@ -1478,7 +1513,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   for (let i = 0; i < 250; i++) T.logDiag({ type: "plant", naam: "n" + i });
   const l = T.loadDiag();
   ok(l.length === 200 && l[0].naam === "n249", "logboek bewaart de laatste 200, nieuwste eerst");
-  ok(l[0].v === "ontwikkel · v10.4" && typeof l[0].t === "string", "elk item heeft versie en tijd");
+  ok(l[0].v === "ontwikkel · v10.5" && typeof l[0].t === "string", "elk item heeft versie en tijd");
   const r = fresh(); setKeys({ gemini: "GEHEIM-SLEUTEL-123" }); mount(r.App);
   global.__net.handler = () => gemOk(PLANT);
   uploadFile(0); await waitText("Madeliefje"); click("Terug");
@@ -1502,7 +1537,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   ok(/^natuurscanner-diagnose-\d{4}-\d{2}-\d{2}\.json$/.test(global.__downloads[0].download), "bestandsnaam: " + global.__downloads[0].download);
   const tekst = await new Promise((res) => { const fr = new window.FileReader(); fr.onload = () => res(fr.result); fr.readAsText(global.__lastBlob); });
   const d = JSON.parse(tekst);
-  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.4" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
+  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.5" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
   ok(!tekst.includes("data:image") && !tekst.includes("GEHEIM-SLEUTEL-123"), "export bevat geen foto's en geen sleutels");
   ok(hasText("Diagnose-export gemaakt (3 scans"), "bevestiging getoond");
   click("Logboek wissen"); ok(hasText("Logboek: 0 scans") && hasText("Logboek gewist"), "logboek wissen werkt");
