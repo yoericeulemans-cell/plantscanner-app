@@ -30,6 +30,12 @@ pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
   <h1>PlantNet ziektetest</h1>
   <p>Test of jouw eigen PlantNet-sleutel de ziektecheck mag gebruiken. De sleutel blijft in je eigen browser en gaat alleen naar PlantNet. Elke test kost 1 punt van je dagtegoed (500 per dag).</p>
 
+  <div class="box" id="adres">
+    <b>Adres van deze pagina (dit moet je bij PlantNet invullen):</b>
+    <pre id="adresTekst">…</pre>
+    <p style="margin:6px 0 0">Zet dit exact, <b>mét https://</b>, bij &laquo;Geautoriseerde domeinen&raquo; in je PlantNet-account (my.plantnet.org &rarr; instellingen &rarr; API-sleutel), en zet de schakelaar &laquo;mijn API-sleutel openbaar maken&raquo; aan.</p>
+  </div>
+
   <label for="sleutel">Jouw PlantNet-sleutel</label>
   <input type="password" id="sleutel" autocomplete="off" placeholder="Plak hier je sleutel, of laat hem uit de app halen">
   <p id="sleutelInfo"></p>
@@ -51,6 +57,7 @@ pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
   var el = function (id) { return document.getElementById(id); };
   var BASIS = "https://my-api.plantnet.org/v2";
   var blob = null;
+  try { el("adresTekst").textContent = location.origin; } catch (e) {}
 
   // Sleutel uit de app halen als die op hetzelfde adres staat
   try {

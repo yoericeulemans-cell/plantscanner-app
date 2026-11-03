@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gemini-test (Worker)</title>
+<style>
+:root { box-sizing: border-box; --bg: #f5f7f4; --fg: #1d2a22; --muted: #5b6b61; --card: #ffffff; --line: #cfd8d2; --accent: #1f7a4d; --accent-fg: #ffffff; --warn: #b3541e; --ok: #1f7a4d; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14201a; --fg: #e8f0ea; --muted: #9db0a4; --card: #1c2c24; --line: #2f4439; --accent: #3fbf80; --accent-fg: #0c1a12; --warn: #f0a06a; --ok: #6fdc9f; color-scheme: dark; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 620px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 6px; }
+p { margin: 0 0 12px; color: var(--muted); }
+label { display: block; font-weight: 600; margin: 14px 0 6px; }
+input[type=password] { width: 100%; box-sizing: border-box; padding: 12px; font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+button { display: block; width: 100%; margin: 12px 0 0; padding: 14px; font: inherit; font-weight: 600; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-fg); }
+button:disabled { opacity: .5; }
+button.zacht { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 16px 0 0; font-size: 14px; overflow-x: auto; }
+.warn { color: var(--warn); }
+.ok { color: var(--ok); }
+.rij { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rij:last-child { border-bottom: 0; }
+pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gemini-test (via je Worker)</h1>
+  <p>Zoekt uit waarom de scanner soms "even moe" is. Er wordt een klein groen plaatje naar je Worker gestuurd, net zoals de app doet. Elke test telt als 1 oproep (Test B: 3). De sleutel blijft in je browser en gaat alleen naar je eigen Worker.</p>
+
+  <label for="sleutel">Jouw Gemini-sleutel</label>
+  <input type="password" id="sleutel" autocomplete="off" placeholder="Plak hier je sleutel, of laat hem uit de app halen">
+  <p id="sleutelInfo"></p>
+  <p id="recent"></p>
+
+  <button id="knopA">⚡ Test A: één oproep</button>
+  <button id="knopB" class="zacht">🔁 Test B: 3 oproepen na elkaar (3 s ertussen)</button>
+
+  <div class="box" id="uitslag">Nog niets getest.</div>
+</main>
+<script>
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+  var WORKER = "https://summer-snowflake-d2dc.yoericeulemans.workers.dev/gemini";
+  var MINI = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAgACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCKiiiuE+cCiiigAooooAKKKKAP/9k="; // klein echt JPEG-plaatje (32x32, groen)
+  var PROMPT = "Antwoord enkel met deze JSON: {\"ok\":true}";
+
+  try {
+    var bewaard = localStorage.getItem("plantscanner_gemini_key");
+    if (bewaard) { el("sleutel").value = bewaard; el("sleutelInfo").textContent = "De sleutel uit je app is al ingevuld."; }
+    else el("sleutelInfo").textContent = "Er stond geen sleutel van de app op dit adres. Plak hem hierboven.";
+    var gebruik = JSON.parse(localStorage.getItem("plantscanner_api_usage") || "[]");
+    var nu = Date.now();
+    var laatste = gebruik.filter(function (t) { return nu - t < 60000; }).length;
+    el("recent").textContent = "Oproepen van deze browser in de laatste minuut (door de app): " + laatste + ".";
+  } catch (e) { el("sleutelInfo").textContent = "Plak je sleutel hierboven."; }
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  // Zet status + antwoordtekst om in een uitleg voor een volwassene.
+  function classificeer(status, tekst) {
+    var t = String(tekst || "").toLowerCase().replace(/[\s_-]/g, "");
+    if (status === 0) return { ok: false, soort: "geen-antwoord", uitleg: "Geen antwoord gekregen. Mogelijk een netwerkprobleem, een Worker die niet bereikbaar is, of de browser liet de aanvraag niet toe (CORS)." };
+    if (status >= 200 && status < 300) return { ok: true, soort: "ok", uitleg: "Gelukt: de Worker en Gemini werken." };
+    if (status === 429 && (t.indexOf("perday") >= 0 || t.indexOf("dailylimit") >= 0)) return { ok: false, soort: "dag-limiet", uitleg: "Het dagelijkse limiet van Gemini is bereikt. Dat herstelt zichzelf (rond 9 uur Belgische tijd). Meer ruimte vraagt een ander model of een betaald plan." };
+    if (status === 429) return { ok: false, soort: "minuut-limiet", uitleg: "Te veel oproepen in korte tijd (limiet per minuut), of het tegoed van dit model is op. Even wachten helpt meestal; staat 'perday' niet in het antwoord, dan is het geen dagelijks limiet." };
+    if (status === 503) return { ok: false, soort: "overbelast", uitleg: "Gemini is tijdelijk overbelast. Dat ligt niet aan jou of je sleutel; probeer later opnieuw." };
+    if (status === 404) return { ok: false, soort: "model-weg", uitleg: "Model of route niet gevonden. Mogelijk bestaat het model dat de Worker gebruikt niet meer: de Worker moet dan een ander model krijgen." };
+    if (status === 400 || status === 401 || status === 403) return { ok: false, soort: "sleutel", uitleg: "Gemini of de Worker weigert de aanvraag. Meestal is de sleutel fout, geblokkeerd of zonder toegang. Controleer ook of het project niet is gemarkeerd (zie het antwoord hieronder)." };
+    if (status >= 500) return { ok: false, soort: "server", uitleg: "Fout aan de serverkant (Worker of Gemini). Bekijk het technische antwoord hieronder." };
+    return { ok: false, soort: "onbekend", uitleg: "Onverwacht antwoord (HTTP " + status + "). Bekijk het technische antwoord hieronder." };
+  }
+  window.__classificeer = classificeer;
+
+  function eenOproep(sleutel) {
+    var start = Date.now();
+    var status = 0, hoofd = "";
+    return fetch(WORKER + "?api-key=" + sleutel, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base64: MINI, prompt: PROMPT })
+    }).then(function (r) {
+      status = r.status;
+      try { var ra = r.headers.get("retry-after"); if (ra) hoofd = "Retry-After: " + ra; } catch (e) {}
+      return r.text();
+    }).then(function (tekst) {
+      return { status: status, tekst: tekst, sec: ((Date.now() - start) / 1000).toFixed(1), hoofd: hoofd };
+    }, function (e) {
+      return { status: 0, tekst: String(e && e.message || e), sec: ((Date.now() - start) / 1000).toFixed(1), hoofd: "" };
+    });
+  }
+
+  function regel(nr, r) {
+    var c = classificeer(r.status, r.tekst);
+    var kop = (nr ? "Oproep " + nr + ": " : "") + "<b class='" + (c.ok ? "ok" : "warn") + "'>" + (c.ok ? "Gelukt" : "Mislukt") + (r.status ? " (HTTP " + r.status + ")" : "") + "</b> in " + r.sec + " s.";
+    var extra = r.hoofd ? "<br>" + esc(r.hoofd) : "";
+    var uitleg = "<br>" + esc(c.uitleg);
+    var tech = r.tekst ? "<details><summary>Technisch antwoord</summary><pre>" + esc(r.tekst.slice(0, 1500)) + "</pre></details>" : "";
+    return "<div class='rij'>" + kop + extra + uitleg + tech + "</div>";
+  }
+
+  function sleutelOk() {
+    var s = el("sleutel").value.trim();
+    if (!s) { el("uitslag").innerHTML = "<span class='warn'>Vul eerst je Gemini-sleutel in.</span>"; return null; }
+    return s;
+  }
+  function bezig(aan) { el("knopA").disabled = aan; el("knopB").disabled = aan; }
+
+  el("knopA").addEventListener("click", function () {
+    var s = sleutelOk(); if (!s) return;
+    bezig(true); el("uitslag").textContent = "Bezig…";
+    eenOproep(s).then(function (r) { el("uitslag").innerHTML = regel(0, r); bezig(false); });
+  });
+
+  el("knopB").addEventListener("click", function () {
+    var s = sleutelOk(); if (!s) return;
+    bezig(true); el("uitslag").textContent = "Bezig (oproep 1 van 3)…";
+    var html = "", nr = 0;
+    function volgende() {
+      nr++;
+      eenOproep(s).then(function (r) {
+        html += regel(nr, r);
+        el("uitslag").innerHTML = html + (nr < 3 ? "<p>Bezig (oproep " + (nr + 1) + " van 3)…</p>" : "");
+        if (nr < 3) setTimeout(volgende, 3000); else bezig(false);
+      });
+    }
+    volgende();
+  });
+})();
+</script>
+</body>
+</html>
