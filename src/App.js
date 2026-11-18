@@ -147,7 +147,10 @@ function friendlyErrorMessage(raw) {
   if (compact.includes("perday") || compact.includes("dailylimit") || compact.includes("dagelijks")) {
     return "🌙 De scanner heeft voor vandaag genoeg gewerkt. Probeer het morgen opnieuw! (Volwassene: het dagelijkse limiet van Gemini is bereikt.)";
   }
-  if (text.includes("429") || text.includes("rate_limit") || text.includes("503") || text.includes("druk") || text.includes("high demand") || text.includes("antwoordde niet binnen")) {
+  if (text.includes("antwoordde niet binnen")) {
+    return "⏳ De scanner had te lang nodig. Probeer het nog eens, liefst met een scherpe foto van dichterbij.";
+  }
+  if (text.includes("429") || text.includes("rate_limit") || text.includes("503") || text.includes("druk") || text.includes("high demand")) {
     return "😴 De scanner is even moe, probeer over een paar minuutjes opnieuw!";
   }
   if (text.includes("niet bereikbaar") || text.includes("failed to fetch") || text.includes("networkerror")) {
@@ -410,7 +413,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.5";
+const APP_VERSIE = "ontwikkel · v10.6";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -1998,7 +2001,7 @@ function AppInner() {
     saveKeys(updatedKeys);
   };
 
-  async function callGemini(base64, apiKey, prompt, timeoutMs = 35000) {
+  async function callGemini(base64, apiKey, prompt, timeoutMs = 55000) {
     if (!apiKey) throw new Error("Geen Gemini API sleutel ingesteld.");
 
     const maxAttempts = 3; // 1 poging + 2 automatische herkansingen bij tijdelijke drukte (503/429)
@@ -2118,7 +2121,7 @@ function AppInner() {
           base64,
           gemini,
           `Je bent een plantenexpert. Vandaag is het ${huidigeDatumTekst()} in België (seizoen: ${SEIZOEN_NAAM[huidigSeizoen()].toLowerCase()}). Identificeer deze plant EN geef meteen verzorgingsadvies EN een gezondheidscheck EN een giftigheidscheck. Antwoord in eenvoudig Nederlands. Gezondheidscheck: beschrijf eerst kort wat je op de foto ziet aan de bladeren (kleur, vlekken, gaatjes, verwelking, schimmel) in "waargenomen". Zet "gezond" alleen op true als je duidelijk geen verkleuring, vlekken of schade ziet. Zie je gele, bruine of gevlekte bladeren, zet "gezond" dan op false en leg bij "oorzaak" uit of dit door het seizoen normaal kan zijn (bijvoorbeeld herfstkleuren bij een loofboom) of op een probleem wijst; zet "seizoen_normaal" op true als de verkleuring waarschijnlijk seizoensgebonden en normaal is. Is de foto te onduidelijk of weet je het niet zeker, zet "gezond" dan op null. Gok nooit. JSON: {"name":"Nederlandse naam (Latijnse naam)","gezond":true/false/null,"waargenomen":"","seizoen_normaal":true/false/null,"ziekte":"","oorzaak":"","oplossing":"","light":"","soil":"","freq":"","amount":"","tip":"","giftig":{"mens":"niet|licht|matig|sterk|onbekend","dier":"niet|licht|matig|sterk|onbekend","delen":"welke delen giftig zijn","symptomen":"mogelijke klachten, kort","omgang":"hoe ga je ermee om, bv. handschoenen of handen wassen"}} Bij giftig: dier betekent katten en honden. Weet je het niet zeker, antwoord onbekend. Gok nooit.`,
-          35000
+          55000
         ).catch((e) => {
           errors.push(`Gemini: ${e.message}`);
           return null;
