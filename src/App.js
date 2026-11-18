@@ -413,7 +413,7 @@ function nlVoices() {
     return (window.speechSynthesis.getVoices() || []).filter((v) => voiceScore(v) > -900).sort((a, b) => voiceScore(b) - voiceScore(a) || String(a.name).localeCompare(String(b.name)));
   } catch (e) { return []; }
 }
-const APP_VERSIE = "ontwikkel · v10.6";
+const APP_VERSIE = "ontwikkel · v10.7";
 // Alle keuzes voor de stem: de Nederlandse stemmen van het toestel + 2 "systeemstemmen" (de app dwingt dan geen stem af,
 // het toestel kiest zelf de standaardstem voor nl-BE of nl-NL).
 function stemOpties() {
@@ -1433,6 +1433,7 @@ function AppInner() {
   const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState("");
   const [toonSleutels, setToonSleutels] = useState(false);
+  const [sleutelTest, setSleutelTest] = useState(null);
   const [backupBericht, setBackupBericht] = useState("");
   const [diagBericht, setDiagBericht] = useState("");
   const [diagTeller, setDiagTeller] = useState(0);
@@ -2049,6 +2050,24 @@ function AppInner() {
     throw lastErr;
   }
 
+  async function testGeminiSleutel() {
+    const k = String(keys.gemini || "").trim();
+    if (!k) { setSleutelTest({ ok: false, tekst: "Vul eerst een Gemini-sleutel in." }); return; }
+    setSleutelTest({ bezig: true });
+    try {
+      await callGemini("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAQABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCnRRRXEeYf/9k=", k, 'Antwoord uitsluitend met dit JSON-object: {"ok":true}', 20000);
+      setSleutelTest({ ok: true, tekst: "Je sleutel werkt." });
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      const l = m.toLowerCase();
+      const tip = /api key not valid|api_key_invalid|\(400\)|\(403\)/.test(l) ? "De sleutel lijkt niet te kloppen. Kopieer hem opnieuw, zonder spaties ervoor of erna."
+        : /429|quota|perday|dailylimit/.test(l.replace(/[\s_-]/g, "")) ? "De sleutel is geldig, maar de gratis limiet is nu bereikt. Wacht even of probeer morgen."
+        : /niet bereikbaar|failed to fetch/.test(l) ? "Geen verbinding. Controleer je internet."
+        : "Dat lukte niet.";
+      setSleutelTest({ ok: false, tekst: tip + " (" + m.slice(0, 120) + ")" });
+    }
+  }
+
   async function plantNetZiekteCheck() {
     if (!result || !result.image) return;
     const sleutel = String(keys.plantNet || "").trim();
@@ -2548,6 +2567,27 @@ function AppInner() {
 
             <label style={s.label}>Gemini API</label>
             <input style={s.input} type={toonSleutels ? "text" : "password"} autoComplete="new-password" value={keys.gemini} onChange={(e) => setKeys({ ...keys, gemini: e.target.value })} />
+
+            <div style={{ fontSize: 14, lineHeight: "1.6", marginBottom: 12, background: "rgba(0,0,0,0.2)", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>🧭 Hulp: gratis Gemini-sleutel in 4 stappen</div>
+              <div>1. Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: "#a8e6cf" }}>aistudio.google.com/apikey</a> en log in met een Google-account.</div>
+              <div>2. Kies "Create API key" (een nieuw project is prima).</div>
+              <div>3. Kopieer de sleutel en plak hem hierboven bij Gemini API.</div>
+              <div>4. Druk op "Test mijn sleutel".</div>
+              <div style={{ opacity: 0.75, marginTop: 6 }}>De sleutel blijft op dit toestel. Deel hem nooit en zet hem niet in een schermafbeelding.</div>
+              <button type="button" style={{ ...s.ghostButton, marginTop: 10 }} disabled={!!(sleutelTest && sleutelTest.bezig)} onClick={testGeminiSleutel}>{sleutelTest && sleutelTest.bezig ? "Bezig met testen..." : "✅ Test mijn sleutel"}</button>
+              {sleutelTest && !sleutelTest.bezig && <div style={{ marginTop: 8, fontWeight: 700 }}>{sleutelTest.ok ? "✅ " : "❌ "}{sleutelTest.tekst}</div>}
+            </div>
+          </div>
+
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, marginBottom: 12, color: "#a8e6cf", fontSize: 18 }}>🔐 Privacy</div>
+            <div style={{ fontSize: 14, lineHeight: "1.6" }}>
+              <div>• Bij een scan gaat de foto naar Google Gemini (via een doorgeefluik). Alleen als je een PlantNet- of Plant.id-sleutel invult, gaat de foto ook naar die dienst. Hun eigen regels gelden dan. Bij de gratis versie van Gemini kan Google gegevens gebruiken om zijn producten te verbeteren, dus scan geen privéfoto's.</div>
+              <div>• Je sleutels, geschiedenis en album blijven op dit toestel in de browser.</div>
+              <div>• De klassikale teller (Firebase) stuurt alleen een tijdstip, geen foto's, en enkel als daar een URL is ingevuld.</div>
+              <div>• De uitkomst is een inschatting. Eet of gebruik nooit iets alleen omdat de app het zegt.</div>
+            </div>
           </div>
 
           <div style={s.card}>

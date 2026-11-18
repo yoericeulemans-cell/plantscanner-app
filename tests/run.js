@@ -106,7 +106,7 @@ const setKids = () => click(/🧒 Uit/);
 // =====================================================================================
 test("A1 versie en data-aantallen", "controle", () => {
   const { T } = fresh();
-  eq(T.APP_VERSIE, "ontwikkel · v10.6", "APP_VERSIE");
+  eq(T.APP_VERSIE, "ontwikkel · v10.7", "APP_VERSIE");
   eq(T.ALL_QUIZ_QUESTIONS.length, 174, "aantal quizvragen (147 + 27 nieuwe)");
   const per = { 1: 0, 2: 0, 3: 0 };
   T.ALL_QUIZ_QUESTIONS.forEach((q) => { per[q.niveau] = (per[q.niveau] || 0) + 1; });
@@ -224,7 +224,7 @@ test("B3 giftigheid en voorlezen-tekst", "controle", () => {
 // =====================================================================================
 test("C1 startscherm", "controle", () => {
   const { App } = fresh(); mount(App);
-  ok(hasText("v: ontwikkel · v10.6"), "versienummer onder de titel");
+  ok(hasText("v: ontwikkel · v10.7"), "versienummer onder de titel");
   for (const l of ["Scan Plant (Camera)", "Scan Dier (Camera)", "Upload Plant", "Upload Dier", "Geschiedenis (0)", "Instellingen"]) ok(hasText(l), "knop: " + l);
   ok(!hasText("Natuur Safari") && !hasText("Natuur Quiz"), "safari/quiz verborgen zonder kindermodus");
   const bar = btn("Instellingen").parentElement;
@@ -278,7 +278,7 @@ test("C4 voorlezen, tempo en stem (telefoon zonder Nederlandse stemmen)", "contr
   eq(speech.spoken[0].rate, 0.9, "tempo normaal 0,9");
   click("Stem 1/2");
   ok(hasText("Stem 2/2"), "stem wisselt naar 2/2");
-  ok(hasText("Versie: ontwikkel · v10.6"), "stem-uitleg toont versie");
+  ok(hasText("Versie: ontwikkel · v10.7"), "stem-uitleg toont versie");
   eq(speech.spoken[speech.spoken.length - 1].lang, "nl-NL", "tweede stem = nl-NL");
   click("🐇 Normaal");
   ok(hasText("🐢 Traag"), "tempo wisselt naar traag");
@@ -782,6 +782,23 @@ async function unlockSettings() {
   if (btn("Ontgrendel")) { fireEvent.change(document.querySelector('input[type="password"]'), { target: { value: "1234" } }); click("Ontgrendel"); }
   await waitText("🏫 Leerkracht Missies");
 }
+
+test("F2 sleutel-hulp en privacykaart in Instellingen", "controle", async () => {
+  const { App } = fresh(); setKeys({ gemini: "TEST-G" }); mount(App);
+  await unlockSettings();
+  ok(hasText("gratis Gemini-sleutel in 4 stappen"), "hulp zichtbaar");
+  ok(hasText("aistudio.google.com/apikey"), "verwijzing naar AI Studio");
+  const a = [...document.querySelectorAll("a")].find((x) => x.href.includes("aistudio.google.com/apikey"));
+  ok(a && a.target === "_blank" && /noopener/.test(a.rel), "link opent veilig in nieuw tabblad");
+  ok(hasText("🔐 Privacy") && hasText("naar Google Gemini"), "privacykaart zichtbaar");
+  global.__net.handler = (u) => isGemini(u) ? gemOk({ ok: true }) : { status: 200, json: {} };
+  click("Test mijn sleutel");
+  await waitText("Je sleutel werkt.");
+  global.__net.handler = (u) => isGemini(u) ? { status: 400, text: "API key not valid" } : { status: 200, json: {} };
+  click("Test mijn sleutel");
+  await waitText("lijkt niet te kloppen");
+  ok(hasText("❌"), "fout wordt getoond");
+});
 
 test("F1 sleutels standaard verborgen", "controle", async () => {
   const { App } = fresh(); setKeys({ gemini: "GEHEIM-G", plantNet: "GEHEIM-N", plantId: "GEHEIM-P" }); mount(App);
@@ -1515,7 +1532,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   for (let i = 0; i < 250; i++) T.logDiag({ type: "plant", naam: "n" + i });
   const l = T.loadDiag();
   ok(l.length === 200 && l[0].naam === "n249", "logboek bewaart de laatste 200, nieuwste eerst");
-  ok(l[0].v === "ontwikkel · v10.6" && typeof l[0].t === "string", "elk item heeft versie en tijd");
+  ok(l[0].v === "ontwikkel · v10.7" && typeof l[0].t === "string", "elk item heeft versie en tijd");
   const r = fresh(); setKeys({ gemini: "GEHEIM-SLEUTEL-123" }); mount(r.App);
   global.__net.handler = () => gemOk(PLANT);
   uploadFile(0); await waitText("Madeliefje"); click("Terug");
@@ -1539,7 +1556,7 @@ test("J6 diagnose-logboek en export", "scan", async () => {
   ok(/^natuurscanner-diagnose-\d{4}-\d{2}-\d{2}\.json$/.test(global.__downloads[0].download), "bestandsnaam: " + global.__downloads[0].download);
   const tekst = await new Promise((res) => { const fr = new window.FileReader(); fr.onload = () => res(fr.result); fr.readAsText(global.__lastBlob); });
   const d = JSON.parse(tekst);
-  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.6" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
+  ok(d.app === "NatuurScanner" && d.soort === "diagnose-export" && d.versie === "ontwikkel · v10.7" && Array.isArray(d.logboek) && d.logboek.length === 3 && d.statistieken, "export bevat app, versie, logboek en statistieken");
   ok(!tekst.includes("data:image") && !tekst.includes("GEHEIM-SLEUTEL-123"), "export bevat geen foto's en geen sleutels");
   ok(hasText("Diagnose-export gemaakt (3 scans"), "bevestiging getoond");
   click("Logboek wissen"); ok(hasText("Logboek: 0 scans") && hasText("Logboek gewist"), "logboek wissen werkt");
